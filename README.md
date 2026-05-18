@@ -4,6 +4,8 @@
 
 <h4 align="center">Keeping secrets safe. Since April 2026</h4>
 
+<div align="center"><img width="520" height="310" alt="Image" src="https://github.com/user-attachments/assets/676fc46a-396f-4269-8ee4-d5db490f4f9d" /></div>
+
 ## Overview
 
 Odin is a **post-quantum resistant secure data vault** built with Java Swing and C libraries. Designed from the bottom up with pirvacy and security concepts while remaining lightweight and easy to run with only a standard JDK with dependenies into one neat package (.jar/.vbs). 
@@ -29,8 +31,8 @@ Upon class project completion, the project was compared to Bitwarden, after read
 <div align="center">
 
 <figure>
-  <img width="607" height="408" alt="Image" src="https://github.com/user-attachments/assets/b1f83315-dc38-411d-a1a8-30c0f2718d31" />
-  <figcaption>Main vault view</figcaption>
+  <img width="607" height="408" alt="Image" src="https://github.com/user-attachments/assets/83093a66-8b2f-449d-971f-4277198e2d85" />
+  <figcaption>Main vault view</figcaption> 
 </figure>
 
 ---
