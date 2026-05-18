@@ -1,0 +1,6 @@
+bin/*
+bin/fatjar
+bin/JavaPasswordVault.jar
+JavaPasswordVault.jar
+fatjar
+vault.db
