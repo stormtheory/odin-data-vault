@@ -11,6 +11,9 @@ import javax.swing.*;
 import org.json.*;
 import java.awt.Component;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+
 import de.mkammerer.argon2.Argon2Advanced;
 import de.mkammerer.argon2.Argon2Factory;
 import de.mkammerer.argon2.Argon2Factory.Argon2Types;
@@ -113,6 +116,7 @@ public class ImportExport {
     public static boolean DEBUG = false;
     private boolean isRamImport;
     private boolean isExport;
+    private static String filename = null;
 
     // ===== CIPHER / CRYPTO CONSTANTS =====
     private static final int    KDF_TYPE_ARGON2    = 1;       // Odin native KDF
@@ -175,9 +179,7 @@ public class ImportExport {
      * Shows the import/export dialog.
      * Called from the Odin toolbar - parent frame needed for modal anchoring.
      */
-    public void showImportExportDialog(JFrame parent,
-                                       List<Yggdrasil.Credential> credentials,
-                                       Runnable onImportComplete) {
+    public void showImportExportDialog(JFrame parent, List<Yggdrasil.Credential> credentials, Runnable onImportComplete) {
 
         // ===== LOAD VAULT SECURITY PROFILE =====
         String vaultLevel;
@@ -362,12 +364,21 @@ public class ImportExport {
 
             infoLabel.setForeground(ThemeManager.TEXT_MUTED);
             infoLabel.setText(switch (op) {
-                case EXPORT_ODIN          -> "Argon2id + AES-256-GCM encrypted. Profile: " + vaultLevel;
+                case EXPORT_ODIN          -> "Argon2id + AES-256-GCM encrypted. Profile: " + vaultLevel; 
                 case EXPORT_BITWARDEN     -> "PBKDF2 + AES-256-CBC. Use this password when importing into Bitwarden.";
                 case IMPORT_ODIN          -> "Select your Odin backup .json file then enter its password.";
                 case IMPORT_BITWARDEN_ENC -> "Select your Bitwarden encrypted .json file then enter its password.";
                 case IMPORT_BITWARDEN_RAM -> "File is saved to RAM only and wiped immediately after import.";
             });
+
+            // Define the timestamp format matching: 20260514071740
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+            String timestamp = LocalDateTime.now().format(formatter);
+
+            switch (op) {
+                case EXPORT_ODIN          -> filename = "odin_encrypted_export_" + timestamp + ".json"; 
+                case EXPORT_BITWARDEN     -> filename = "bitwarden_encrypted_export_" + timestamp + ".json";
+                }
 
             dialog.revalidate();
             dialog.repaint();
@@ -378,13 +389,15 @@ public class ImportExport {
         updateUiForOperation.run();
 
         // ===== BROWSE =====
+
         browseBtn.addActionListener(e -> {
             JFileChooser fc = new JFileChooser();
 
             for (Component comp : fc.getComponents()) {
                 ThemeManager.themeFileChooserComponents(comp);
             }
-
+            
+            if (filename != null && !filename.isEmpty()) {fc.setSelectedFile(new java.io.File(filename));}
             fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("JSON (*.json)", "json"));
             fc.setCurrentDirectory(new File(System.getProperty("user.home") + "/Documents"));
             int result = fc.showDialog(dialog, "Select");
@@ -643,9 +656,9 @@ public class ImportExport {
         dialog.setVisible(true);
     }
 
-    // ===================================================================
-    // ===== CORE EXPORT - Odin format: Argon2id + AES-256-GCM
-    // ===================================================================
+    // ===================================================================================================
+    // ===== CORE EXPORT - Odin format: Argon2id + AES-256-GCM    =========   ODIN EXPORTER
+    // ===================================================================================================
 
     /**
      * Exports all credentials to an Odin encrypted backup JSON string.
@@ -680,7 +693,8 @@ public class ImportExport {
         String encKeyValidation = encryptGcm(new byte[0], encKey);
 
         JSONObject outer = new JSONObject();
-        outer.put("encrypted",                    true);
+        outer.put("program",                       "odin"); 
+        outer.put("encrypted",                     true);
         outer.put("passwordProtected",             true);
         outer.put("salt",                          Base64.getEncoder().encodeToString(salt));
         outer.put("kdfType",                       KDF_TYPE_ARGON2);
@@ -1014,7 +1028,7 @@ public class ImportExport {
     }
 
     // ===============================================================================================================================
-    // ===== ODIN / BITWARDEN ITEM BUILDER (Odin credential -> plaintext JSON item)
+    // ===== ODIN / BITWARDEN EXPORT ITEM BUILDER (Odin credential -> plaintext JSON item)
     // ===============================================================================================================================
 
     /**
@@ -1213,7 +1227,7 @@ public class ImportExport {
     }
 
     // =================================================================================================================================
-    // ===== ODIN / BITWARDEN ITEM PARSER (Bitwarden JSON item -> Odin)
+    // ===== ODIN / BITWARDEN IMPORT ITEM PARSER (Bitwarden JSON item -> Odin)
     // =================================================================================================================================
 
     /**
