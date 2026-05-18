@@ -137,9 +137,12 @@ public class ImportExport {
     private static final int BW_CARD     = 3;
     private static final int BW_IDENTITY = 4;
 
-    private static final int ODIN_NOTES  = 10;
-    private static final int ODIN_DOCS   = 11;
-    private static final int ODIN_BINARY = 12;
+    private static final int ODIN_NOTES    = 10;
+    private static final int ODIN_DOCS     = 11;
+    private static final int ODIN_BINARY   = 12;
+    private static final int ODIN_SSH      = 13;
+    private static final int ODIN_PASSKEY  = 14;
+    private static final int ODIN_VPN      = 15;
 
     // ===== DEPENDENCIES =====
     private final Yggdrasil  backend;
@@ -1097,6 +1100,61 @@ public class ImportExport {
 
             // ===== SSH, VPN, PASSKEY -> secureNote + custom fields =====
             case "ssh", "vpn", "passkey" -> {
+                if (odin) {
+                    if (c.type.equals("ssh")){
+                        item.put("type",       ODIN_SSH);
+                        JSONObject odinItem = new JSONObject();
+                        odinItem.put("hostname",        decryptField(c, 0));
+                        odinItem.put("username",        decryptField(c, 1));
+                        odinItem.put("priv_key",        decryptField(c, 2));
+                        odinItem.put("pub_key",         decryptField(c, 3));
+                        odinItem.put("passphrase",      decryptField(c, 4));
+                        odinItem.put("type",            decryptField(c, 5));
+                        odinItem.put("notes",           decryptField(c, 6));
+                        item.put("odinSSH", odinItem);
+                    } else if (c.type.equals("vpn")){
+                        item.put("type",       ODIN_VPN);
+                        JSONObject odinItem = new JSONObject();
+                        odinItem.put("hostname",        decryptField(c, 0));
+                        odinItem.put("username",        decryptField(c, 1));
+                        odinItem.put("password-psk",    decryptField(c, 2));
+                        odinItem.put("config-key",      decryptField(c, 3));
+                        odinItem.put("protocol",        decryptField(c, 4));
+                        odinItem.put("port",            decryptField(c, 5));
+                        odinItem.put("notes",           decryptField(c, 6));
+                        item.put("odinVPN", odinItem);
+                    } else {
+                        item.put("type",       ODIN_PASSKEY);
+                        JSONObject odinItem = new JSONObject();
+                        odinItem.put("site",            decryptField(c, 0));
+                        odinItem.put("username",        decryptField(c, 1));
+                        odinItem.put("cred_id",         decryptField(c, 2));
+                        odinItem.put("priv_key",        decryptField(c, 3));
+                        odinItem.put("pub_key",         decryptField(c, 4));
+                        odinItem.put("algorithm",       decryptField(c, 5));
+                        odinItem.put("notes",           decryptField(c, 6));
+                        item.put("odinPasskey", odinItem);
+                    }
+
+                        // Build custom fields array for any additional sensitive metadata
+                        JSONArray fields = new JSONArray();
+                        if (type != null) {
+                            for (int i = 0; i < type.fields.size(); i++) {
+                                String val = decryptField(c, i);
+                                if (val.isEmpty()) continue;
+                                Futhark.Field f = type.fields.get(i);
+                                JSONObject field = new JSONObject();
+                                field.put("name",  f.label); /// TAG
+                                field.put("value", val);
+                                // 1 = hidden/sensitive, 0 = plain text
+                                field.put("type",  (f.sensitive || f.password) ? 1 : 0);
+                                fields.put(field);
+                            }
+                        }
+                        item.put("fields", fields);
+
+                } else {
+                    // BITWARDEN - doesn't compare to our fields 
                 item.put("type",       BW_NOTE);
                 item.put("secureNote", new JSONObject().put("type", 0));
                 item.put("notes",      JSONObject.NULL);
@@ -1116,6 +1174,7 @@ public class ImportExport {
                 }
                 item.put("fields", fields);
                 }
+            }
 
                 case "binary" -> {
                     if (odin) {
@@ -1124,12 +1183,12 @@ public class ImportExport {
                         
                         JSONObject odinItem = new JSONObject();
                         odinItem.put("system",       decryptField(c, 0));
-                        odinItem.put("username",       decryptField(c, 1));
+                        odinItem.put("username",     decryptField(c, 1));
                         odinItem.put("base64",       decryptField(c, 2));
                         odinItem.put("filename",     decryptField(c, 3));
                         odinItem.put("sha256-file",  decryptField(c, 4));
                         odinItem.put("sha256-data",  decryptField(c, 5));
-                        odinItem.put("notes",      decryptField(c, 6));
+                        odinItem.put("notes",        decryptField(c, 6));
                         item.put("odinBinary", odinItem);
 
                         // Build custom fields array for any additional sensitive metadata
@@ -1187,7 +1246,6 @@ public class ImportExport {
                                 item.put("secureNote", new JSONObject().put("type", 0));
                         }
                     }
-                
             
                     case "docs" -> {
                     if (odin) {

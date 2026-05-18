@@ -125,8 +125,9 @@ No external database or installer required, unless you want it.
 * Passphrase Generator
 
 **[ Big Ticket Items ]**
-* Browser Extension for Firefox and Chrome
-* Export to Bitwarden
+* Browser Extension for Firefox and Chrome **(Looking into but maybe not be up to the level of security and privacy worth doing)**
+* iOS App
+* --Export to Bitwarden--
 * Local encrypted file storage - Store encrypted documents and photos
 
 **[[ Long-term Goal ]]**
