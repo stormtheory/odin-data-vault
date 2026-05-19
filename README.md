@@ -8,7 +8,7 @@
 
 ## Overview
 
-Odin is a **post-quantum resistant secure data vault** built with Java Swing and C libraries. Designed from the bottom up with pirvacy and security concepts while remaining lightweight and easy to run with only a standard JDK with dependenies into one neat package (.jar/.vbs). 
+Odin is a **post-quantum resistant secure data vault** built with Java Swing and C libraries. Designed from the bottom up with privacy and security concepts while remaining lightweight and easy to run with only a standard JDK with dependencies into one neat package (.jar/.vbs). 
 
 All stored data is encrypted using **AES-256-GCM** (authenticated encryption), with keys derived via **Argon2id** from a user-provided master password. Sensitive data read into in memory then zero'd out immediately, and passwords are only decrypted when explicitly requested, minimizing exposure. AES-256-GCM is recognized by NIST as **post-quantum resistant**.
 
@@ -25,7 +25,7 @@ Upon class project completion, the project was compared to Bitwarden, after read
 | Key Derivation | PBKDF2-SHA256 (Default)   | **Argon2id**                |
 | Encryption     | AES-256-CBC + HMAC-SHA256 | **AES-256-GCM**             |
 | Language       | C# / TypeScript           | **Java / C libraries**      |
-| Import/Export  | PBKDF2-SHA256 Only (weak) | **Argon2id** at any setting |
+| Import/Export  | PBKDF2-SHA256 Only        | **Argon2id** at any setting |
 
 ---
 <div align="center">
