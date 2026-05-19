@@ -11,7 +11,7 @@ public class Login extends JFrame {
 
     // ===== CONFIG - mirrors Odin constants =====
     private static final String DATABASE_VER    = "0";
-    private static int    PASSWORD_LENGTH = 14; // Default for Vault Creation and Changes
+    private static int    PASSWORD_LENGTH = 12; // Default for Vault Creation and Changes   // 12 is the safest with all Argon2id levels
 
     // ===== STARTUP STATE =====
     private static boolean      arg_vaultPath   = false;
@@ -237,23 +237,27 @@ public class Login extends JFrame {
 
             JButton btnCreate = new JButton("Create New Vault");
             JButton btnLocate = new JButton("Locate Existing Vault");
+            JButton kdfBtn = new JButton("Strength Chart");
+            kdfBtn.addActionListener(e -> KdfChartDialog.show());
+            ThemeManager.styleSurfaceButton(kdfBtn);
+            
             JButton btnCancel = new JButton("Cancel");
             ThemeManager.styleSurfaceButton(btnCreate);
             ThemeManager.styleSurfaceButton(btnLocate);
             ThemeManager.styleSurfaceButton(btnCancel);
-
+            
             JOptionPane vaultPane = new JOptionPane(
                 "No vault found at " + vaultPath + "\nCreate a new vault or locate an existing one?",
                 JOptionPane.QUESTION_MESSAGE,
                 JOptionPane.DEFAULT_OPTION,
                 dialogIcon,
-                new Object[]{ btnCreate, btnLocate, btnCancel },
+                new Object[]{ btnCreate, btnLocate, kdfBtn, btnCancel },
                 null
             );
 
             JDialog vaultDialog = vaultPane.createDialog(null, "Vault Not Found");
-            vaultDialog.setModal(true); // ===== Block until user resolves =====
 
+            vaultDialog.setModal(true); // ===== Block until user resolves ===== 
             // ===== CANCEL - exit before any vault is touched =====
             btnCancel.addActionListener(e -> { vaultDialog.dispose(); System.exit(0); });
 

@@ -1517,9 +1517,11 @@ public class Odin {
     // ===== CHANGE MASTER PASSWORD =====
     private void changeMasterPass(String username) {
         char[][] creds = createNewMasterPass(conn, false,false,"From_SQL",PASSWORD_LENGTH);
-
-        if (creds[0].toString().equals("true")) {
             try {
+                masterPassword = creds[1];
+                username = new String(creds[2]);
+                VaultLevel = new String(creds[3]);
+                DATABASE_TYPE = new String(creds[4]);
                 backend.changeMasterPass(conn, masterPassword, username);
                 ToastManager.success(mainFrame, "Password changed for " + username);
             } catch (Exception e) {
@@ -1528,7 +1530,6 @@ public class Odin {
             }
             Yggdrasil.wipeCharArray(masterPassword);
         }
-    }
 
     // ===== PASSWORD STRENGTH CHECK =====
     public boolean testPasswordStrength(char[] password, char[] p2) {
@@ -1572,6 +1573,9 @@ public class Odin {
             JLabel         blank          = new JLabel(" ");
             JLabel         blank2         = new JLabel(" ");
             JLabel         blank3         = new JLabel(" ");
+            JButton kdfBtn = new JButton("Compare profile options: Strength Chart");
+            ThemeManager.styleSurfaceButton(kdfBtn);
+            kdfBtn.addActionListener(e -> KdfChartDialog.show());
 
             Thor.StrengthBarPanel strengthBar = new Thor.StrengthBarPanel();
             pf1.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
@@ -1592,11 +1596,12 @@ public class Odin {
 
             JComboBox<String> profileSelector = new JComboBox<>(new String[]{
                 "Minimum  - Low risk, high throughput (OWASP 2023)",
+                "Warden   - Recommended for mobile and lower-end hardware",
                 "Balanced - Most applications (RFC 9106)",
                 "High     - Sensitive credentials (RFC 9106)",
-                "Paranoid - Vault/master-key grade"
+                "Paranoid - Vault-grade master key derivation, exceeds all published standards"
             });
-            profileSelector.setSelectedIndex(2); // ===== Default High =====
+            profileSelector.setSelectedIndex(2); // ===== Default Balanced =====
 
             if (!createVault) {
                 // ===== Pre-select current vault level when changing password =====
@@ -1604,9 +1609,10 @@ public class Odin {
                     if (!arg_vaultLevel) VaultLevel  = Mimir.Pull_DB_Text_Meta_item(conn, "vault_level");
                     int    idx = switch (VaultLevel.trim()) {
                         case "MINIMUM"  -> 0;
-                        case "BALANCED" -> 1;
-                        case "HIGH"     -> 2;
-                        case "PARANOID" -> 3;
+                        case "WARDEN"   -> 1;
+                        case "BALANCED" -> 2;
+                        case "HIGH"     -> 3;
+                        case "PARANOID" -> 4;
                         default -> { System.err.println("ERROR: Unknown vault_level " + VaultLevel); yield 2; }
                     };
                     profileSelector.setSelectedIndex(idx);
@@ -1638,10 +1644,11 @@ public class Odin {
                 blank2,blank2,
                 typeLabel, dbSelector, usernameLabel, usernameField,
                 blank,blank,
-                "Create Master Password:", pf1,
-                "Confirm Password:",       pf2,
-                "Password Strength:",      strengthBar,
-                "Security Profile:",       profileSelector,
+                "Create Master Password:",  pf1,
+                "Confirm Password:",        pf2,
+                "Password Strength:",       strengthBar,
+                "Security Profile:",        profileSelector,
+                kdfBtn,
                 blank,blank,
                 
                 blank3,blank3,
@@ -1680,10 +1687,11 @@ public class Odin {
             char[] p2 = pf2.getPassword();
             VaultLevel = switch (profileSelector.getSelectedIndex()) {
                 case 0  -> "MINIMUM";
-                case 1  -> "BALANCED";
-                case 2  -> "HIGH";
-                case 3  -> "PARANOID";
-                default -> "HIGH";
+                case 1  -> "WARDEN";
+                case 2  -> "BALANCED";
+                case 3  -> "HIGH";
+                case 4  -> "PARANOID";
+                default -> "BALANCED";
             };
 
             if (!createVault) {
@@ -1728,8 +1736,8 @@ public class Odin {
                 } catch (Exception e) {
                     e.printStackTrace();
                     ToastManager.error(mainFrame, "Failed to add user: " + userField.getText());
-                }
-            }
+                } 
+            } else {ToastManager.error(mainFrame, "Failed to add user: " + userField.getText());}
         }
     }
 
@@ -1748,6 +1756,6 @@ public class Odin {
                 e.printStackTrace();
                 ToastManager.error(mainFrame, "Failed to delete user: " + userField.getText());
             }
-        }
+        } else {ToastManager.error(mainFrame, "Failed to add user: " + userField.getText());}
     }
 }

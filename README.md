@@ -272,11 +272,13 @@ No external database or installer required, unless you want it.
   **[ Argon2 - Strength Levels ]**
   * ++ Level → Only Recommended Uses ++
   * MINIMUM  → rate-limited online service, low-value data
+  * WARDEN   → Recommended for mobile and lower-end hardware
   * BALANCED → typical application credentials
   * HIGH     → the RFC 9106 authors' explicit recommendation for sensitive credentials
-  * PARANOID → the key is the secret (master key, recovery code, vault root) - you derive it rarely, so you can afford to make it brutal
+  * PARANOID → Vault-grade master key derivation, exceeds all published standards - you derive it rarely, so you can afford to make it brutal
 
-<img width="300" height="225" alt="Image" src="https://github.com/user-attachments/assets/73c6bf6b-3ec3-468e-ae1a-0ee700eee965" />
+<img width="350" height="275" alt="Image" src="https://github.com/user-attachments/assets/73c6bf6b-3ec3-468e-ae1a-0ee700eee965" />
+<img width="980" height="660" alt="Image" src="https://github.com/user-attachments/assets/c87def31-8ae7-4deb-9eae-e5d00fac786e" />
 
 ## Decryption
 

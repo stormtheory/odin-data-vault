@@ -147,14 +147,7 @@ public class Yggdrasil {
         String DATABASE_TYPE = Mimir.Pull_DB_Text_Meta_item(conn, "type");
         VaultLevel = Mimir.Pull_DB_Text_Meta_item(conn, "vault_level");
 
-        Argon2Profile.Profile profile = switch (VaultLevel) {
-            case "MINIMUM"  -> Argon2Profile.MINIMUM;
-            case "BALANCED" -> Argon2Profile.BALANCED;
-            case "HIGH"     -> Argon2Profile.HIGH;
-            case "PARANOID" -> Argon2Profile.PARANOID;
-            default -> throw new IllegalArgumentException("Unknown security profile: " + VaultLevel);
-        };
-
+        Argon2Profile.Profile profile =  Argon2Profile.profileSelector(VaultLevel);
         int[] params = {profile.iterations(), profile.memoryKb(), profile.parallelism()};
 
         // Generate a fresh salt — never reuse a salt even for the same user
@@ -499,13 +492,7 @@ public class Yggdrasil {
     protected void useraddEntry(Connection conn, String newUsername, char[] newPassword)
         throws Exception {
         VaultLevel = Mimir.Pull_DB_Text_Meta_item(conn, "vault_level");
-        Argon2Profile.Profile profile = switch (VaultLevel) {
-            case "MINIMUM"  -> Argon2Profile.MINIMUM;
-            case "BALANCED" -> Argon2Profile.BALANCED;
-            case "HIGH"     -> Argon2Profile.HIGH;
-            case "PARANOID" -> Argon2Profile.PARANOID;
-            default -> throw new IllegalArgumentException("Unknown security profile: " + VaultLevel);
-        };
+        Argon2Profile.Profile profile =  Argon2Profile.profileSelector(VaultLevel);
 
         byte[] new_salt = new byte[SALT_SIZE];
         new SecureRandom().nextBytes(new_salt);
@@ -556,13 +543,7 @@ public class Yggdrasil {
                                   String type, String VaultLevel) throws Exception {
         Statement stmt = conn.createStatement();
 
-        Argon2Profile.Profile profile = switch (VaultLevel) {
-            case "MINIMUM"  -> Argon2Profile.MINIMUM;
-            case "BALANCED" -> Argon2Profile.BALANCED;
-            case "HIGH"     -> Argon2Profile.HIGH;
-            case "PARANOID" -> Argon2Profile.PARANOID;
-            default -> throw new IllegalArgumentException("Unknown security profile: " + VaultLevel);
-        };
+        Argon2Profile.Profile profile =  Argon2Profile.profileSelector(VaultLevel);
 
         // ===== VAULT TABLE =====
         // Generic data0..data10 columns — field meaning defined by EntrySchema per type
