@@ -121,13 +121,18 @@ No external database or installer required, unless you want it.
 ## 🚀 Future Improvements
 
 **[ New Features ]**
-* Search/filter functionality
+* -Search/filter functionality-
+* Encrypt datatype
 * Passphrase Generator
+* "revisionDate": "2025-07-30T23:37:16.386Z",
+* "creationDate": "2025-02-09T00:40:38.286Z",
+* "folders":  
+* "totp":
 
 **[ Big Ticket Items ]**
 * Browser Extension for Firefox and Chrome **(Looking into but maybe not be up to the level of security and privacy worth doing)**
 * iOS App
-* --Export to Bitwarden--
+* -Export to Bitwarden-
 * Local encrypted file storage - Store encrypted documents and photos
 
 **[[ Long-term Goal ]]**
@@ -262,7 +267,7 @@ No external database or installer required, unless you want it.
 
 ## Database Versions
 **[ 0 ]** [Current]
-* Beta: |Argon2id|AES256-GCM|SALT|IV|10 slots of data| Testing of new database ideas and expanding, expect to have to rebuild if something changes ina newer version, so keep your older versions until tested.
+* Beta: |Argon2id|AES256-GCM|SALT|IV|11 slots of data| Testing of new database ideas and expanding, expect to have to rebuild if something changes ina newer version, so keep your older versions until tested.
 
 ## Encryption
 

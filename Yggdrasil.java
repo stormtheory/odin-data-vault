@@ -45,6 +45,11 @@ public class Yggdrasil {
         protected int    id;
         protected String type;          // entry type key — "account", "note", "card" etc.
         protected char[] tag;           // decrypted label/name — shown in table
+        protected boolean favorite;
+        protected String folder;
+        protected String creation;
+        protected String revision;
+        protected char[] totp;
 
         // ===== GENERIC DATA FIELDS =====
         // Mirrors data0..data8 DB columns.  Stored as encrypted bytes.
@@ -410,7 +415,7 @@ public class Yggdrasil {
     // ===== ADD ENTRY =====
     // Encrypts all fields and writes one row to the vault table.
     // dataFields array maps index 0→data0, 1→data1, ... 8→data8
-    protected void addEntry(Connection conn, char[] tag, String type, char[][] dataFields, String dbType) throws Exception {
+    protected void addEntry(Connection conn, char[] tag, String type, char[][] dataFields, String dbType, String creation, String revision, String folder) throws Exception {
         byte[] iv = generateIV(); // single IV per row
 
         byte[] enc_tag   = encryptData(tag,   iv, Vault_Use_Key);
@@ -423,15 +428,18 @@ public class Yggdrasil {
             }
         }
 
-        String sql = "INSERT INTO vault(type, tag, data0, data1, data2, data3, data4, data5, data6, data7, data8, iv) " +
-                     "VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO vault(type, tag, data0, data1, data2, data3, data4, data5, data6, data7, data8, creation, revision, folder, iv) " +
+                     "VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, type);
             stmt.setBytes(2,  enc_tag);
             for (int i = 0; i < 8; i++) {
                 stmt.setBytes(i + 3, enc_data[i]); // null → SQL NULL via JDBC
             }
-            stmt.setBytes(12, iv);
+            stmt.setString(12, creation);
+            stmt.setString(13, revision);
+            stmt.setString(14, folder);
+            stmt.setBytes(15, iv);
             stmt.executeUpdate();
         }
 
@@ -552,7 +560,7 @@ public class Yggdrasil {
             CREATE TABLE vault (
                 id       INTEGER PRIMARY KEY AUTOINCREMENT,
                 type     TEXT, 
-                favorite TEXT, 
+                favorite TEXT, CHECK (favorite IN (false, true))
                 folder   BLOB,
                 tag      BLOB,
                 data0    BLOB,
@@ -566,7 +574,7 @@ public class Yggdrasil {
                 data8    BLOB,
                 data9    BLOB,
                 data10   BLOB,
-                created  BLOB,
+                creation BLOB,
                 revision BLOB,
                 iv       BLOB
             )
