@@ -22,6 +22,11 @@ public class Odin {
     private static final int    CLIPBOARD_CLEAR_MS = 30_000; // 30 seconds
     private static final int    BUFFER_SIZE = 8 * 1024;
 
+// =========== FILTER =================
+    private JTextField searchField;
+    private String     currentSearchQuery = "";
+    private boolean    suppressSearchListener = false;
+
 // ===== FIELDS WRITTEN BY Login.finishStartup() - must be public =====
     private static String                binaryPath;
     public String                        DATABASE_TYPE;
@@ -190,10 +195,19 @@ public class Odin {
         // ===== BOTTOM TOOLBAR =====
         JPanel toolbar = buildToolbar();
 
+        // ===== SEARCH BAR - sits above the table, filters by tag =====
+        JPanel searchPanel = buildSearchBar();
+
         // ===== MAIN CONTENT =====
         JPanel center = new JPanel(new BorderLayout());
         center.setBackground(ThemeManager.BG);
+        center.add(searchPanel,   BorderLayout.NORTH);
         center.add(verticalSplit, BorderLayout.CENTER);
+        // JPanel center = new JPanel(new BorderLayout());
+        // center.setBackground(ThemeManager.BG);
+        // center.add(verticalSplit, BorderLayout.CENTER);
+
+
 
         // ===== ROOT LAYOUT =====
         JPanel root = new JPanel(new BorderLayout());
@@ -204,6 +218,175 @@ public class Odin {
 
         mainFrame.setContentPane(root);
         mainFrame.setVisible(true);
+    }
+
+    // ===== SEARCH BAR =====
+    /**
+     * Builds a centered search field panel rendered above the main table.
+     * Filters visible rows by tag column on each keystroke.
+     * Placeholder is painted via paintComponent - never touches the document.
+     */
+    private JPanel buildSearchBar() {
+        JPanel panel = new JPanel(new BorderLayout(0, 0));
+        panel.setBackground(ThemeManager.SURFACE2);
+        panel.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, ThemeManager.BORDER));
+
+        // ===== INNER WRAPPER - constrains search field to center column =====
+        JPanel inner = new JPanel(new BorderLayout(6, 0));
+        inner.setBackground(ThemeManager.SURFACE2);
+        inner.setBorder(BorderFactory.createEmptyBorder(8, 16, 8, 16));
+
+        // ===== MAGNIFIER ICON LABEL =====
+        JLabel iconLabel = new JLabel("🔍");
+        iconLabel.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+        iconLabel.setForeground(ThemeManager.TEXT_MUTED);
+
+        // ===== PLACEHOLDER TEXTFIELD - paints hint without touching the document =====
+        // paintComponent draws hint text when empty - no setText, no focus listener needed
+        searchField = new JTextField() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                // ===== Only paint hint when field is empty =====
+                if (getText().isEmpty()) {
+                    Graphics2D g2 = (Graphics2D) g.create();
+                    g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
+                                        RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                    g2.setColor(ThemeManager.TEXT_MUTED);
+                    g2.setFont(getFont().deriveFont(Font.ITALIC));
+                    Insets ins = getInsets();
+                    // ===== Vertically center the hint text within the field =====
+                    FontMetrics fm = g2.getFontMetrics();
+                    int y = (getHeight() - fm.getHeight()) / 2 + fm.getAscent();
+                    g2.drawString("Search " + currentTypeFilter + " tags...", ins.left + 4, y);
+                    g2.dispose();
+                }
+            }
+        };
+        searchField.getCaret().setBlinkRate(0);
+        searchField.setBackground(ThemeManager.SURFACE2);
+        searchField.setForeground(ThemeManager.TEXT);
+        searchField.setCaretColor(ThemeManager.ACCENT);
+        searchField.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(ThemeManager.BORDER),
+            BorderFactory.createEmptyBorder(4, 8, 4, 8)
+        ));
+        searchField.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+        searchField.setToolTipText("Search by tag...");
+
+        // ===== CLEAR BUTTON - visible only when field has text =====
+        JButton clearBtn = new JButton("clear");
+        clearBtn.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        clearBtn.setForeground(ThemeManager.TEXT_MUTED);
+        clearBtn.setBackground(ThemeManager.SURFACE2);
+        clearBtn.setBorderPainted(false);
+        clearBtn.setFocusPainted(false);
+        clearBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        clearBtn.setPreferredSize(new Dimension(28, 28));
+        clearBtn.setVisible(false); // ===== Hidden until user types =====
+        clearBtn.addActionListener(e -> {
+            suppressSearchListener = true;
+            searchField.setText("");
+            suppressSearchListener = false;
+            currentSearchQuery = "";
+            clearBtn.setVisible(false);
+            refreshTable(); // ===== Call through captured outer instance =====
+        });
+
+        // ===== LIVE FILTER - fires on every keystroke =====
+        searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            void update() {
+                // ===== Skip programmatic setText calls =====
+                if (suppressSearchListener) return;
+                currentSearchQuery = searchField.getText().trim();
+                clearBtn.setVisible(!currentSearchQuery.isEmpty());
+                filterTable(); // ===== Call through captured outer instance =====
+            }
+            public void insertUpdate (javax.swing.event.DocumentEvent e) { update(); }
+            public void removeUpdate (javax.swing.event.DocumentEvent e) { update(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { update(); }
+        });
+
+        inner.add(iconLabel,   BorderLayout.WEST);
+        inner.add(searchField, BorderLayout.CENTER);
+        inner.add(clearBtn,    BorderLayout.EAST);
+
+        // ===== CENTER the inner panel so it doesn't stretch edge-to-edge =====
+        panel.add(inner, BorderLayout.CENTER);
+        return panel;
+    }
+
+    // ===== FILTER TABLE BY TAG =====
+    /**
+     * Rebuilds the table showing only credentials whose tag contains the search query.
+     * Case-insensitive. Falls back to full refreshTable() when query is empty.
+     * Does NOT mutate the credentials list - purely a display filter.
+     */
+    private void filterTable() {
+        // ===== Empty query - show everything for the current type =====
+        if (currentSearchQuery == null || currentSearchQuery.isEmpty()) {
+            refreshTable();
+            return;
+        }
+
+        String query = currentSearchQuery.toLowerCase();
+        Futhark.EntryType type = Futhark.forKey(currentTypeFilter);
+
+        // ===== REBUILD COLUMN HEADERS - same as refreshTable() =====
+        String[] headers = Futhark.tableHeaders(type);
+        model.setColumnCount(0);
+        model.setRowCount(0);
+        for (String h : headers) model.addColumn(h);
+
+        // ===== HIDE ID COLUMN =====
+        if (!DEBUG) {
+            if (table.getColumnModel().getColumnCount() > 0) {
+                table.getColumnModel().getColumn(0).setMinWidth(0);
+                table.getColumnModel().getColumn(0).setMaxWidth(0);
+            }
+        }
+        // ===== HIDE TYPE COLUMN =====
+        if (table.getColumnModel().getColumnCount() > 1) {
+            table.getColumnModel().getColumn(1).setMinWidth(0);
+            table.getColumnModel().getColumn(1).setMaxWidth(0);
+        }
+
+        // ===== POPULATE ONLY MATCHING ROWS =====
+        for (Yggdrasil.Credential c : credentials) {
+            if (!currentTypeFilter.equals(c.type)) continue;
+
+            // ===== TAG MATCH - case-insensitive substring search =====
+            String tag = new String(c.tag).toLowerCase();
+            if (!tag.contains(query)) continue; // ===== Skip non-matching rows =====
+
+            Object[] rowData = new Object[headers.length];
+            rowData[0] = c.id;
+            rowData[1] = (type != null ? type.icon : "") + " " + currentTypeFilter;
+            rowData[2] = new String(c.tag);
+
+            if (type != null) {
+                for (int i = 0; i < type.tableColumnIndices.length && (i + 3) < headers.length; i++) {
+                    int           fieldIdx = type.tableColumnIndices[i];
+                    Futhark.Field field    = type.fields.get(fieldIdx);
+                    if (field.sensitive || field.password) {
+                        rowData[i + 3] = "••••••••"; // ===== Never show sensitive data in table =====
+                    } else {
+                        byte[] enc = c.getDataField(fieldIdx);
+                        if (enc != null) {
+                            try {
+                                if (DEBUG) System.out.println("Decrypt for Show - Wipe Memory Space after");
+                                char[] val = backend.decryptData(enc, c.iv);
+                                rowData[i + 3] = new String(val);
+                                Yggdrasil.wipeCharArray(val);
+                            } catch (Exception e) {
+                                rowData[i + 3] = "[error]";
+                            }
+                        }
+                    }
+                }
+            }
+            model.addRow(rowData);
+        }
     }
 
     // ===== SIDEBAR =====
@@ -831,12 +1014,26 @@ public class Odin {
         } catch (Exception e) { e.printStackTrace(); }
     }
 
+    private void updateSearchPlaceholder() {
+        if (searchField == null) return;
+        // ===== No setText needed - hint is painted dynamically from currentTypeFilter =====
+        if (currentSearchQuery.isEmpty()) {
+            suppressSearchListener = true;
+            searchField.setText(""); // ===== Ensure field is visually clear =====
+            suppressSearchListener = false;
+            searchField.repaint();   // ===== Repaint so hint text shows new category name =====
+        }
+    }
+
     // ===== REFRESH TABLE =====
     /**
      * Rebuilds the table model for the currently selected entry type.
      * Sensitive fields always show as bullets in the table.
      */
     private void refreshTable() {
+        currentSearchQuery = ""; // Clear search when switching categories, one of my favorites
+        updateSearchPlaceholder();
+
         Futhark.EntryType type = Futhark.forKey(currentTypeFilter);
         if (DEBUG) System.out.println("Filter: " + currentTypeFilter);
 
