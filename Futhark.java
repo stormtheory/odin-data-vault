@@ -95,7 +95,7 @@ public class Futhark {
             "note", "Notes", "📝",
             List.of(
                 new Field("data0", "Subject",  true, false, false, false),
-                new Field("data1", "Notes",  true,  true, false, true)
+                new Field("data1", "Note",  true,  true, false, true)
             ),
             new int[]{0,1}
         ));

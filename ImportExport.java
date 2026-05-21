@@ -860,10 +860,13 @@ public class ImportExport {
             try {
                 Object[] parsed = parseBitwardenItem(items.getJSONObject(i), true);
                 if (parsed == null) continue;
-                char[]   tag        = (char[])  parsed[0];
-                String   odinType   = (String)  parsed[1];
-                char[][] dataFields = (char[][]) parsed[2];
-                backend.addEntry(conn, tag, odinType, dataFields, dbType);
+                char[]   tag            = (char[])  parsed[0];
+                String   odinType       = (String)  parsed[1];
+                char[][] dataFields     = (char[][]) parsed[2];
+                String   creationDate   = (String)  parsed[3];
+                String   revisionDate   = (String)  parsed[4];
+                String   folderId         = (String)  parsed[5];
+                backend.addEntry(conn, tag, odinType, dataFields, dbType, creationDate, revisionDate, folderId);
                 for (char[] d : dataFields) if (d != null) Yggdrasil.wipeCharArray(d);
                 Yggdrasil.wipeCharArray(tag);
                 count++;
@@ -973,7 +976,10 @@ public class ImportExport {
                 char[]   tag        = (char[])  parsed[0];
                 String   odinType   = (String)  parsed[1];
                 char[][] dataFields = (char[][]) parsed[2];
-                backend.addEntry(conn, tag, odinType, dataFields, dbType);
+                String   creationDate   = (String)  parsed[3];
+                String   revisionDate   = (String)  parsed[4];
+                String   folderId         = (String)  parsed[5];
+                backend.addEntry(conn, tag, odinType, dataFields, dbType, creationDate, revisionDate, folderId);
                 for (char[] d : dataFields) if (d != null) Yggdrasil.wipeCharArray(d);
                 Yggdrasil.wipeCharArray(tag);
                 count++;
@@ -1019,7 +1025,10 @@ public class ImportExport {
                 char[]   tag        = (char[])  parsed[0];
                 String   odinType   = (String)  parsed[1];
                 char[][] dataFields = (char[][]) parsed[2];
-                backend.addEntry(conn, tag, odinType, dataFields, dbType);
+                String   creationDate   = (String)  parsed[3];
+                String   revisionDate   = (String)  parsed[4];
+                String   folderId         = (String)  parsed[5];
+                backend.addEntry(conn, tag, odinType, dataFields, dbType, creationDate, revisionDate, folderId);
                 for (char[] d : dataFields) if (d != null) Yggdrasil.wipeCharArray(d);
                 Yggdrasil.wipeCharArray(tag);
                 count++;
@@ -1064,6 +1073,13 @@ public class ImportExport {
                 login.put("totp",     JSONObject.NULL);
                 item.put("login", login);
                 item.put("notes", decryptField(c, 3));
+                if (odin) {
+                item.put("creationDate", c.creationDate);
+                item.put("revisionDate", c.revisionDate);
+                } else {
+                item.put("creationDate", c.creationDate);
+                item.put("revisionDate", c.revisionDate);
+                }
             }
 
             // ===== CARD -> card (type 3) =====
@@ -1081,6 +1097,14 @@ public class ImportExport {
                 card.put("code",     decryptField(c, 3));
                 item.put("card",  card);
                 item.put("notes", decryptField(c, 6));
+                if (odin) {
+                item.put("folderId", c.folderId);
+                item.put("creationDate", c.creationDate);
+                item.put("revisionDate", c.revisionDate);
+                } else {
+                item.put("creationDate", c.creationDate);
+                item.put("revisionDate", c.revisionDate);
+                }
             }
 
             // ===== ADDRESS -> identity (type 4) =====
@@ -1096,6 +1120,14 @@ public class ImportExport {
                 identity.put("country",    decryptField(c, 5));
                 item.put("identity", identity);
                 item.put("notes",    decryptField(c, 6));
+                if (odin) {
+                item.put("folderId", c.folderId);
+                item.put("creationDate", c.creationDate);
+                item.put("revisionDate", c.revisionDate);
+                } else {
+                item.put("creationDate", c.creationDate);
+                item.put("revisionDate", c.revisionDate);
+                }
             }
 
             // ===== SSH, VPN, PASSKEY -> secureNote + custom fields =====
@@ -1111,6 +1143,9 @@ public class ImportExport {
                         odinItem.put("passphrase",      decryptField(c, 4));
                         odinItem.put("type",            decryptField(c, 5));
                         odinItem.put("notes",           decryptField(c, 6));
+                        item.put("folderId", c.folderId);
+                        item.put("creationDate", c.creationDate);
+                        item.put("revisionDate", c.revisionDate);
                         item.put("odinSSH", odinItem);
                     } else if (c.type.equals("vpn")){
                         item.put("type",       ODIN_VPN);
@@ -1122,8 +1157,11 @@ public class ImportExport {
                         odinItem.put("protocol",        decryptField(c, 4));
                         odinItem.put("port",            decryptField(c, 5));
                         odinItem.put("notes",           decryptField(c, 6));
+                        item.put("folderId", c.folderId);
+                        item.put("creationDate", c.creationDate);
+                        item.put("revisionDate", c.revisionDate);
                         item.put("odinVPN", odinItem);
-                    } else {
+                    } else if (c.type.equals("passkey")) {
                         item.put("type",       ODIN_PASSKEY);
                         JSONObject odinItem = new JSONObject();
                         odinItem.put("site",            decryptField(c, 0));
@@ -1133,8 +1171,11 @@ public class ImportExport {
                         odinItem.put("pub_key",         decryptField(c, 4));
                         odinItem.put("algorithm",       decryptField(c, 5));
                         odinItem.put("notes",           decryptField(c, 6));
+                        item.put("folderId", c.folderId);
+                        item.put("creationDate", c.creationDate);
+                        item.put("revisionDate", c.revisionDate);
                         item.put("odinPasskey", odinItem);
-                    }
+                    } else { return null; }
 
                         // Build custom fields array for any additional sensitive metadata
                         JSONArray fields = new JSONArray();
@@ -1153,7 +1194,7 @@ public class ImportExport {
                         }
                         item.put("fields", fields);
 
-                } else {
+                } else if (!odin) {
                     // BITWARDEN - doesn't compare to our fields 
                 item.put("type",       BW_NOTE);
                 item.put("secureNote", new JSONObject().put("type", 0));
@@ -1173,7 +1214,7 @@ public class ImportExport {
                     }
                 }
                 item.put("fields", fields);
-                }
+                } else { return null; }
             }
 
                 case "binary" -> {
@@ -1189,6 +1230,9 @@ public class ImportExport {
                         odinItem.put("sha256-file",  decryptField(c, 4));
                         odinItem.put("sha256-data",  decryptField(c, 5));
                         odinItem.put("notes",        decryptField(c, 6));
+                        item.put("folderId", c.folderId);
+                        item.put("creationDate", c.creationDate);
+                        item.put("revisionDate", c.revisionDate);
                         item.put("odinBinary", odinItem);
 
                         // Build custom fields array for any additional sensitive metadata
@@ -1218,8 +1262,11 @@ public class ImportExport {
                         JSONObject odinItem = new JSONObject();
                         odinItem.put("subject",       decryptField(c, 0));
                         odinItem.put("notes",       decryptField(c, 1));
+                        item.put("folderId", c.folderId);
+                        item.put("creationDate", c.creationDate);
+                        item.put("revisionDate", c.revisionDate);
                         
-                        item.put("odinBinary", odinItem);
+                        item.put("odinNote", odinItem);
 
                         // Build custom fields array for any additional sensitive metadata
                         JSONArray fields = new JSONArray();
@@ -1237,14 +1284,16 @@ public class ImportExport {
                             }
                         }
                         item.put("fields", fields);
-                        } else {
+                        } else if (!odin) {
                             // ===== NOTE -> secureNote (type 2) =====
                             // data0=subject, data1=body
                                 item.put("type",       BW_NOTE);
                                 item.put("name",       decryptField(c, 0));
                                 item.put("notes",      decryptField(c, 1));
                                 item.put("secureNote", new JSONObject().put("type", 0));
-                        }
+                                item.put("creationDate", c.creationDate);
+                                item.put("revisionDate", c.revisionDate);
+                        } else { return null; }
                     }
             
                     case "docs" -> {
@@ -1252,13 +1301,16 @@ public class ImportExport {
                         // Build the odinDocs sub-object with decrypted file metadata
                         item.put("type",       ODIN_DOCS);
                         
-                        JSONObject odinDocs = new JSONObject();
-                        odinDocs.put("base64",       decryptField(c, 0));
-                        odinDocs.put("filename",     decryptField(c, 1));
-                        odinDocs.put("sha256-file",  decryptField(c, 2));
-                        odinDocs.put("sha256-data",  decryptField(c, 3));
-                        odinDocs.put("notes",        decryptField(c, 4));
-                        item.put("odinDocs", odinDocs);
+                        JSONObject odinItem = new JSONObject();
+                        odinItem.put("base64",       decryptField(c, 0));
+                        odinItem.put("filename",     decryptField(c, 1));
+                        odinItem.put("sha256-file",  decryptField(c, 2));
+                        odinItem.put("sha256-data",  decryptField(c, 3));
+                        odinItem.put("notes",        decryptField(c, 4));
+                        item.put("folderId", c.folderId);
+                        item.put("creationDate", c.creationDate);
+                        item.put("revisionDate", c.revisionDate);
+                        item.put("odinDocs", odinItem);
 
                         // Build custom fields array for any additional sensitive metadata
                         JSONArray fields = new JSONArray();
@@ -1284,6 +1336,14 @@ public class ImportExport {
         return item;
     }
 
+    private String optStringMulti(JSONObject obj, String defaultValue, String... keys) {
+    for (String key : keys) {
+        String val = obj.optString(key, "");
+        if (!val.isEmpty()) return val;
+    }
+    return defaultValue;
+    }
+
     // =================================================================================================================================
     // ===== ODIN / BITWARDEN IMPORT ITEM PARSER (Bitwarden JSON item -> Odin)
     // =================================================================================================================================
@@ -1302,6 +1362,9 @@ public class ImportExport {
             int    bwType = item.getInt("type");
             String name   = item.optString("name",  "");
             String notes  = item.optString("notes", "");
+            String creationDate = item.optString("creationDate", "");
+            String revisionDate = item.optString("revisionDate", "");
+            String folderId  = item.optString("folderId", "");
 
             // 9 data slots - matches Futhark.DATA_COLUMNS
             char[][] data     = new char[9][];
@@ -1350,6 +1413,16 @@ public class ImportExport {
                 }
             }
 
+                case ODIN_NOTES -> {
+                    odinType="note";
+                    JSONObject id = item.optJSONObject("odinNote");
+                    if (id != null) {
+                        data[0] = id.optString("subject",   "").toCharArray();
+                        data[1] = id.optString("notes",   "").toCharArray();
+                        System.out.println("Read Note");
+                    } 
+                }
+
                 // ===== CARD -> card =====
                 case BW_CARD -> {
                     odinType = "card";
@@ -1379,7 +1452,6 @@ public class ImportExport {
                     }
                     data[6] = notes.toCharArray();
                 }
-
                 case ODIN_BINARY -> {
                     odinType = "binary";
                     JSONObject id = item.optJSONObject("odinBinary");
@@ -1393,17 +1465,49 @@ public class ImportExport {
                         data[5] = id.optString("sha256-data",      "").toCharArray();
                         data[6] = id.optString("notes", "").toCharArray();
                     }
-            }
-
-            case ODIN_NOTES -> {
-                    odinType="note";
-                    JSONObject id = item.optJSONObject("odinNote");
+                }
+                case ODIN_SSH -> {
+                    odinType = "ssh";
+                    JSONObject id = item.optJSONObject("odinSSH");
                     if (id != null) {
-                        data[0] = id.optString("subject",   "").toCharArray();
-                        data[1] = id.optString("note",   "").toCharArray();
-                    }
-            }
 
+                        data[0] = id.optString("hostname",   "").toCharArray();
+                        data[1] = id.optString("username",   "").toCharArray();
+                        data[2] = id.optString("priv_key",   "").toCharArray();
+                        data[3] = id.optString("pub_key",   "").toCharArray();
+                        data[4] = id.optString("passphrase",       "").toCharArray();
+                        data[5] = id.optString("type",      "").toCharArray();
+                        data[6] = id.optString("notes", "").toCharArray();
+                    }
+                }
+                case ODIN_VPN -> {
+                    odinType = "vpn";
+                    JSONObject id = item.optJSONObject("odinVPN");
+                    if (id != null) {
+
+                        data[0] = id.optString("hostname",   "").toCharArray();
+                        data[1] = id.optString("username",   "").toCharArray();
+                        data[2] = id.optString("password-psk",   "").toCharArray();
+                        data[3] = id.optString("config-key",   "").toCharArray();
+                        data[4] = id.optString("protocol",       "").toCharArray();
+                        data[5] = id.optString("port",      "").toCharArray();
+                        data[6] = id.optString("notes", "").toCharArray();
+                    }
+                }
+                case ODIN_PASSKEY -> {
+                    odinType = "passkey";
+                    JSONObject id = item.optJSONObject("odinPasskey");
+                    if (id != null) {
+
+                        data[0] = id.optString("site",   "").toCharArray();
+                        data[1] = id.optString("username",   "").toCharArray();
+                        data[2] = id.optString("cred_id",   "").toCharArray();
+                        data[3] = id.optString("priv_key",   "").toCharArray();
+                        data[4] = id.optString("pub_key",       "").toCharArray();
+                        data[5] = id.optString("algorithm",      "").toCharArray();
+                        data[6] = id.optString("notes", "").toCharArray();
+                    }
+                }
                 case ODIN_DOCS -> {
                     odinType = "docs";
                     JSONObject id = item.optJSONObject("odinDocs");
@@ -1414,12 +1518,12 @@ public class ImportExport {
                         data[3] = id.optString("sha256-data",      "").toCharArray();
                         data[4] = id.optString("notes", "").toCharArray();
                     }
-            }
+                }
 
                 default -> { return null; }
             }
 
-            return new Object[]{ name.toCharArray(), odinType, data };
+            return new Object[]{ name.toCharArray(), odinType, data, creationDate, revisionDate, folderId };
 
         } catch (Exception e) {
             System.err.println("[ImportExport] Parse error: " + e.getMessage());
@@ -1647,6 +1751,19 @@ public class ImportExport {
     private String decryptField(Yggdrasil.Credential c, int fieldIndex) {
         try {
             byte[] enc = c.getDataField(fieldIndex);
+            if (enc == null) return "";
+            char[] val = backend.decryptData(enc, c.iv);
+            String s   = new String(val);
+            Yggdrasil.wipeCharArray(val);
+            return s;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private String decryptField(Yggdrasil.Credential c, byte[] enc_field) {
+        try {
+            byte[] enc = enc_field;
             if (enc == null) return "";
             char[] val = backend.decryptData(enc, c.iv);
             String s   = new String(val);
