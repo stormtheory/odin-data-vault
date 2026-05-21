@@ -1479,11 +1479,13 @@ public class Odin {
                     }
                 }
 
+                String creationDate=" "; // PlaceHolders
+                String revisionDate=" "; // PlaceHolders
+                String folderId=" "; // PlaceHolders
                 if (mode.equals("update")) {
-                    backend.updateEntry(conn, addupdate_id, tagField.getText().toCharArray(), dataFields);
+                    backend.updateEntry(conn, addupdate_id, tagField.getText().toCharArray(), dataFields, folderId);
                 } else {
-                    backend.addEntry(conn, tagField.getText().toCharArray(),
-                        selectedType.typeKey, dataFields, DATABASE_TYPE);
+                    backend.addEntry(conn, tagField.getText().toCharArray(), selectedType.typeKey, dataFields, DATABASE_TYPE, creationDate, revisionDate, folderId);
                 }
 
                 for (char[] d : dataFields) if (d != null) Yggdrasil.wipeCharArray(d);

@@ -2,6 +2,7 @@ import javax.crypto.spec.*;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.Security;
+import java.time.Instant;
 
 import javax.security.auth.DestroyFailedException;
 import javax.crypto.Cipher;
@@ -46,9 +47,9 @@ public class Yggdrasil {
         protected String type;          // entry type key — "account", "note", "card" etc.
         protected char[] tag;           // decrypted label/name — shown in table
         protected boolean favorite;
-        protected String folder;
-        protected String creation;
-        protected String revision;
+        protected String folderId;
+        protected String creationDate;
+        protected String revisionDate;
         protected char[] totp;
 
         // ===== GENERIC DATA FIELDS =====
@@ -415,7 +416,7 @@ public class Yggdrasil {
     // ===== ADD ENTRY =====
     // Encrypts all fields and writes one row to the vault table.
     // dataFields array maps index 0→data0, 1→data1, ... 8→data8
-    protected void addEntry(Connection conn, char[] tag, String type, char[][] dataFields, String dbType, String creation, String revision, String folder) throws Exception {
+    protected void addEntry(Connection conn, char[] tag, String type, char[][] dataFields, String dbType, String creationDate, String revisionDate, String folderId) throws Exception {
         byte[] iv = generateIV(); // single IV per row
 
         byte[] enc_tag   = encryptData(tag,   iv, Vault_Use_Key);
@@ -427,8 +428,11 @@ public class Yggdrasil {
                 enc_data[i] = encryptData(dataFields[i], iv, Vault_Use_Key);
             }
         }
+        if (creationDate == null || creationDate.isEmpty() || creationDate.isBlank()) creationDate = timeCheck_UTC_time();
+        if (revisionDate == null || revisionDate.isEmpty() || revisionDate.isBlank()) revisionDate = timeCheck_UTC_time();
+            
 
-        String sql = "INSERT INTO vault(type, tag, data0, data1, data2, data3, data4, data5, data6, data7, data8, creation, revision, folder, iv) " +
+        String sql = "INSERT INTO vault(type, tag, data0, data1, data2, data3, data4, data5, data6, data7, data8, creationDate, revisionDate, folderId, iv) " +
                      "VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, type);
@@ -436,9 +440,9 @@ public class Yggdrasil {
             for (int i = 0; i < 8; i++) {
                 stmt.setBytes(i + 3, enc_data[i]); // null → SQL NULL via JDBC
             }
-            stmt.setString(12, creation);
-            stmt.setString(13, revision);
-            stmt.setString(14, folder);
+            stmt.setString(12, creationDate);
+            stmt.setString(13, revisionDate);
+            stmt.setString(14, folderId);
             stmt.setBytes(15, iv);
             stmt.executeUpdate();
         }
@@ -453,7 +457,7 @@ public class Yggdrasil {
 
 
     
-    protected void updateEntry(Connection conn, int id, char[] tag, char[][] dataFields) throws Exception {
+    protected void updateEntry(Connection conn, int id, char[] tag, char[][] dataFields, String folderId) throws Exception {
         byte[] iv = generateIV(); // single IV per row
         byte[] enc_tag   = encryptData(tag,   iv, Vault_Use_Key);
 
@@ -464,17 +468,19 @@ public class Yggdrasil {
                 enc_data[i] = encryptData(dataFields[i], iv, Vault_Use_Key);
             }
         }
+        String revisionDate = timeCheck_UTC_time();
 
-        String sql = "UPDATE vault SET tag=?, data0=?, data1=?, data2=?, data3=?, data4=?, " +
-             "data5=?, data6=?, data7=?, data8=?, iv=? WHERE id=?";
+        String sql = "UPDATE vault SET tag=?, data0=?, data1=?, data2=?, data3=?, data4=?, data5=?, data6=?, data7=?, data8=?, revisionDate=?, folderId=?, iv=? WHERE id=?";
 
         try (PreparedStatement update = conn.prepareStatement(sql)) {
             update.setBytes(1,  enc_tag);       // tag
             for (int i = 0; i < 9; i++) {
                 update.setBytes(i + 2, enc_data[i]); // data0..data8 = indices 2..9
             }
-            update.setBytes(11, iv);            // iv
-            update.setInt(12,   id);            // WHERE id = ?  (always last)
+            update.setString(11, revisionDate);
+            update.setString(12, folderId);
+            update.setBytes(13, iv);
+            update.setInt(14,   id);            // WHERE id = ?  (always last)
             update.executeUpdate();
         }
 
@@ -557,26 +563,26 @@ public class Yggdrasil {
         // Generic data0..data10 columns — field meaning defined by EntrySchema per type
         // Notes and tag are always present; data columns are type-specific
         stmt.execute("""
-            CREATE TABLE vault (
-                id       INTEGER PRIMARY KEY AUTOINCREMENT,
-                type     TEXT, 
-                favorite TEXT, CHECK (favorite IN (false, true))
-                folder   BLOB,
-                tag      BLOB,
-                data0    BLOB,
-                data1    BLOB,
-                data2    BLOB,
-                data3    BLOB,
-                data4    BLOB,
-                data5    BLOB,
-                data6    BLOB,
-                data7    BLOB,
-                data8    BLOB,
-                data9    BLOB,
-                data10   BLOB,
-                creation BLOB,
-                revision BLOB,
-                iv       BLOB
+            CREATE TABLE IF NOT EXISTS vault (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                type         TEXT,
+                favorite     INTEGER NOT NULL DEFAULT 0 CHECK (favorite IN (0, 1)),
+                folderId     BLOB,
+                tag          BLOB,
+                data0        BLOB,
+                data1        BLOB,
+                data2        BLOB,
+                data3        BLOB,
+                data4        BLOB,
+                data5        BLOB,
+                data6        BLOB,
+                data7        BLOB,
+                data8        BLOB,
+                data9        BLOB,
+                data10       BLOB,
+                creationDate BLOB,
+                revisionDate BLOB,
+                iv           BLOB
             )
         """);
 
@@ -601,8 +607,9 @@ public class Yggdrasil {
                 argon2_iter INTEGER,
                 argon2_mem  INTEGER,
                 argon2_para INTEGER,
-                created_at  INTEGER,
-                last_login  INTEGER
+                created_at  BLOB,
+                last_login  BLOB,
+                iv          BLOB
             )
         """);
 
@@ -678,5 +685,16 @@ public class Yggdrasil {
             insert.executeUpdate();
         }
         return vault_salt;
+    }
+
+    /**
+    * Returns the current UTC timestamp in ISO-8601 format.
+    * Example output: "2025-07-30T23:37:16.386Z"
+    *
+    * @return ISO-8601 UTC timestamp string with millisecond precision
+    */
+    public static String timeCheck_UTC_time() {
+        // Instant.now() captures current UTC time; toString() formats to ISO-8601 with 'Z' suffix
+        return Instant.now().toString();
     }
 }
