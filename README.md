@@ -25,7 +25,7 @@ Upon class project completion, the project was compared to Bitwarden, after read
 | Key Derivation | PBKDF2-SHA256 (Default)   | **Argon2id**                |
 | Encryption     | AES-256-CBC + HMAC-SHA256 | **AES-256-GCM**             |
 | Language       | C# / TypeScript           | **Java / C libraries**      |
-| Import/Export  | PBKDF2-SHA256 Only (weak) | **Argon2id** at any setting |
+| Import/Export  | PBKDF2-SHA256 Only        | **Argon2id** at any setting |
 
 ---
 <div align="center">
