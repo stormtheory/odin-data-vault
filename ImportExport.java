@@ -1266,7 +1266,7 @@ public class ImportExport {
                         item.put("creationDate", c.creationDate);
                         item.put("revisionDate", c.revisionDate);
                         
-                        item.put("odinNotes", odinItem);
+                        item.put("odinNote", odinItem);
 
                         // Build custom fields array for any additional sensitive metadata
                         JSONArray fields = new JSONArray();
@@ -1418,8 +1418,9 @@ public class ImportExport {
                     JSONObject id = item.optJSONObject("odinNote");
                     if (id != null) {
                         data[0] = id.optString("subject",   "").toCharArray();
-                        data[1] = id.optString("note",   "").toCharArray();
-                    } System.out.println("Read Notes");
+                        data[1] = id.optString("notes",   "").toCharArray();
+                        System.out.println("Read Note");
+                    } 
                 }
 
                 // ===== CARD -> card =====

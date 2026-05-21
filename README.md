@@ -1,6 +1,6 @@
 <div align="center"><img width="250" height="250" alt="Image" src="https://github.com/user-attachments/assets/76ae44a2-00a7-453a-8b75-595f184bd7a2" /></div>
 <h1 align="center">Odin Data Vault</h1>
-<h3 align="center">(Java + SQLite + AES-GCM + Post Quantum Resistant)</h3>
+<h3 align="center">(Java + SQLite3 + Argon2id + AES-GCM + Post Quantum Resistant)</h3>
 
 <h4 align="center">Keeping secrets safe. Since April 2026</h4>
 
@@ -8,7 +8,7 @@
 
 ## Overview
 
-Odin is a **post-quantum resistant secure data vault** built with Java Swing and C libraries. Designed from the bottom up with pirvacy and security concepts while remaining lightweight and easy to run with only a standard JDK with dependenies into one neat package (.jar/.vbs). 
+Odin is a **post-quantum resistant encrypted data vault** built in Java Swing with some C libraries. Designed from the bottom up with privacy and security concepts in mind while remaining lightweight and easy to run with only a standard JDK 17+ with dependencies into one neat package (.jar/.vbs). 
 
 All stored data is encrypted using **AES-256-GCM** (authenticated encryption), with keys derived via **Argon2id** from a user-provided master password. Sensitive data read into in memory then zero'd out immediately, and passwords are only decrypted when explicitly requested, minimizing exposure. AES-256-GCM is recognized by NIST as **post-quantum resistant**.
 
@@ -16,9 +16,9 @@ All stored data is encrypted using **AES-256-GCM** (authenticated encryption), w
 
 ## 🧠 Who Are We and Purpose
 
-Originally a **University of Missouri–Saint Louis (UMSL) Java/Cybersecurity** class project I coded for an Object Orientated Coding Class's end of semester project.  I wanted to do a project that I'm passionate about, **privacy and security** and in doing so built it to demonstrate cryptographic best practices including authenticated encryption, secure key derivation, memory wiping, and safe storage. It has since grown into a full blown ambitious open-source project targeting all operating systems that supports Java 17+. We are NOT a business or for profit, **we are for privacy and security**. We(I at the moment) may offer subscription tiers in the future but that will include safe storage solutions and better small business tools for multi-user setups and people to show a desire for such a thing. My Goal is to give everyone world class **privacy, care, and security** at a fraction of the price.
+Originally a **University of Missouri–Saint Louis (UMSL) Java** class project I coded for an Object Orientated Coding Class's end of semester project. I wanted to do a project on a subject I'm passionate about, which is **privacy and security**. In sticking with privacy and security I built Odin's predecessor to demonstrate cryptographic best practices including authenticated encryption, secure key derivation, memory wiping, and safe storage. It has since grown into a full blown ambitious open-source project targeting all operating systems that supports Java 17+. We(I at the moment) are NOT a business or for profit, **we are for privacy and security**. We may offer subscription tiers in the future but that will include safe storage solutions and better small business tools for multi-user setups and for people that show a desire for such a thing. My Goal is to give everyone world class **privacy, care, and security** at a fraction of the price.
 
-Upon class project completion, the project was compared to Bitwarden, after reading an article about Bitwarden, with the surprised look on my face, I said "I just built Bitwarden". I found that it implements a very similar but stronger modern algorithms across the board by default:
+Upon class project completion, the project was compared to Bitwarden, after reading an article about Bitwarden. With a the surprised look on my face, I said "I just built Bitwarden!". I found that Odin implements a very similar but with stronger modern algorithms across the board by default:
 
 | Feature        |  Bitwarden (April 2026)   | Odin Data Vault             |
 |----------------|---------------------------|-----------------------------|
@@ -51,7 +51,7 @@ Upon class project completion, the project was compared to Bitwarden, after read
 **[ What sets us apart from others: ]**
 * **Stronger and more Modern** whether it's your backup vaults or your main vault, know that you are securing it safely with brute force resistant practices of the highest grade, when setting to HIGH or PARANOID modes. We encrypt **all backups to the same level** as your main vault it can from. 
 * **Documents and Picture Storage** with a builtin viewer for images and PDF documents, you can keep your sensitive documents like DD214, Passport documents, Driver License, and more stored and viewable in one place. 
-* **Binary Keys storage** Got RAW binary keys to store and find it hard to store them ease without manual convertion to hex/base64? We can help!
+* **Binary Keys storage** Got RAW binary keys to store and find it hard to store them ease without manual conversion to hex/base64? We can help!
 * **No Master Password Storage:** Master password is never saved, however note that with multi-user mode, there is a encrypted shared vault key.
 * **Multi-User mode** not just one user can login and use the vault (Shared encryption key) (Good for legacy accounts or small business)
 * **Cross-platform support (Windows / Linux / macOS)** Java is cross-platform compatible and this project is devoted to keeping it that way.
@@ -80,16 +80,15 @@ Upon class project completion, the project was compared to Bitwarden, after read
 * **Light and Dark modes** Got to protect your eyes.
 * **IMPORT/EXPORT** Import your vault from Bitwarden or backup/restore your Logins/Notes/Passkeys/SSHkeys/VPNkeys NOT Local encrypted Data Files **Yet**.
 
-
 ---
 
 ## 💾 Storage
 
-* Database: `vault.db` (SQLite)
+* Database: `vault.db` (SQLite3)
 * Tables:
 
   * `vault`: stores encrypted (tag, username, password, data), and IV
-  * `users`: stores username, role, wrapped_vk(multi-user), user_salt, argon2_parmeters
+  * `users`: stores username, role, wrapped_vk(multi-user), user_salt, argon2_parameters
   * `meta`: stores vault_salt, database_version, database_type, and future metadata
 
 Tags, Usernames, and Passwords are stored as encrypted binary blobs.
@@ -137,7 +136,7 @@ No external database or installer required, unless you want it.
 
 **[[ Long-term Goal ]]**
 **[[[ Server-Based Option ]]]**
-* Modeling after the leader in Password Vaults but with more tactical and techinical improvements.
+* Modeling after the leader in Password Vaults but with more tactical and technical improvements.
 * All encryption and key generation happens locally on the user's device, data is always encrypted before it ever touches a network
 * The master password never leaves the device in any form, not even hashed or partially transmitted
 * Encryption keys are derived and held client-side only, the server is just a locked-down storage device with no ability to decrypt your vault
@@ -155,7 +154,6 @@ No external database or installer required, unless you want it.
           # Download then execute like normal or use Linux command:
 
           java -jar OdinDataVault-*.jar
-
 
 2) Manual Install without Package Manager, run commands:
 
@@ -176,7 +174,6 @@ No external database or installer required, unless you want it.
           lib/*
           bin/
           icons/
-
 
         # Linux Install or edit code:
             cd odin-data-vault
@@ -206,7 +203,6 @@ No external database or installer required, unless you want it.
             Within the folder run command:
             .\run.bat
 
-
 ## Create .jar file, run commands:
   ✔ Works on all platforms
   ✔ No classpath needed
@@ -217,7 +213,6 @@ No external database or installer required, unless you want it.
   Extract directory from the zip file. Run the following commands within the directory.
 
   On your system, for windows run the `.\run.bat -j` and for Linux run `./build.sh -j`
-
 
 ---
 
@@ -235,7 +230,7 @@ No external database or installer required, unless you want it.
     └── build/
 
    1. `File` >> `New Project` >> 
-      `Java with ANT` >> `Java Appilcation` >> `NEXT` >>
+      `Java with ANT` >> `Java Application` >> `NEXT` >>
       Project Name: `JavaVault` (or whatever) >> `Select your locations` >> `Deselect Create Main Class` >> Click `Finish`
             
    2. Drag and drop the files below into your Source Packages under \<default package>:
@@ -267,12 +262,12 @@ No external database or installer required, unless you want it.
 
 ## Database Versions
 **[ 0 ]** [Current]
-* Beta: |Argon2id|AES256-GCM|SALT|IV|11 slots of data| Testing of new database ideas and expanding, expect to have to rebuild if something changes ina newer version, so keep your older versions until tested.
+* Beta: |Argon2id|AES256-GCM|SALT|IV|11 slots of data| Testing of new database ideas and expanding, expect to have to rebuild if something changes in a newer version, so keep your older versions until tested.
 
 ## Encryption
 
   **[ Argon2 ]**
-  The unifying principle: the password/passphrase is just a human-memorable seed that is fed into Argon2id which does the work of turning low-entropy (less complex) human input into high-entropy (complex) key material that costs an attacker real money to brute-force. Not every hardware can handle the overhead or have a real need for alot more overhead. Use the below Strength Levels to find what might be right for you. As hardware gets to be more readily avaiable and with Post Quantum fears I would at least HIGH, but with experts saying we maybe 10 to 20 years away from Quantum Computing. 
+  The unifying principle: the password/passphrase is just a human-memorable seed that is fed into Argon2id which does the work of turning low-entropy (less complex) human input into high-entropy (complex) key material that costs an attacker real money to brute-force. Not every hardware can handle the overhead or have a real need for a lot more overhead. Use the below Strength Levels to find what might be right for you. As hardware gets to be more readily available and with Post Quantum fears I would at least HIGH, but with experts saying we maybe 10 to 20 years away from Quantum Computing. 
 
   **[ Argon2 - Strength Levels ]**
   * ++ Level → Only Recommended Uses ++
@@ -293,7 +288,6 @@ No external database or installer required, unless you want it.
   PBKDF2/Argon2 + salt (stored in DB) → AES key (lives only in RAM)
           ↓
   Session ends → key gone forever
-
 
   **[ Multi User ]**
   User 1 password → Argon2id → verify login
@@ -320,3 +314,5 @@ C Libraries **Already Baked-in**:
   * `jna-5.18.1.jar`
   * `json-20251224.jar`
   * `pdfbox-3.0.7.jar`
+
+
