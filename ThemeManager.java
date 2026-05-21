@@ -2,6 +2,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import javax.swing.JButton;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 import javax.swing.UIManager;
@@ -446,6 +447,87 @@ public class ThemeManager {
         if (comp instanceof Container container) {
             for (Component child : container.getComponents()) {
                 themeFileChooserComponents(child);
+            }
+        }
+    }
+
+    // ===== STYLE OPTION PANE =====
+    // Apply before any showConfirmDialog / showMessageDialog call
+    // JOptionPane creates a new dialog each time so UIManager defaults handle it
+    public static void applyOptionPaneTheme() {
+        // Background of the dialog panel itself
+        UIManager.put("OptionPane.background",        new ColorUIResource(SURFACE));
+        UIManager.put("Panel.background",             new ColorUIResource(SURFACE));
+
+        // Message text color
+        UIManager.put("OptionPane.messageForeground", new ColorUIResource(TEXT));
+
+        // Yes / No / OK / Cancel button colors
+        UIManager.put("Button.background",            new ColorUIResource(SURFACE2));
+        UIManager.put("Button.foreground",            new ColorUIResource(TEXT));
+        UIManager.put("Button.focus",                 new ColorUIResource(BORDER));
+
+        // Border around buttons area
+        UIManager.put("OptionPane.border",
+            javax.swing.BorderFactory.createLineBorder(BORDER, 1));
+    }
+    // ===== THEMED CONFIRM DIALOG =====
+    // JOptionPane buttons ignore UIManager after LAF render - must theme post-creation
+    // Returns JOptionPane.YES_OPTION or JOptionPane.NO_OPTION
+    public static int showThemedConfirm(java.awt.Component parent, String message, String title) {
+        // ===== BUILD PANE MANUALLY SO WE CAN THEME IT BEFORE DISPLAY =====
+        JOptionPane pane = new JOptionPane(
+            message,
+            JOptionPane.QUESTION_MESSAGE,
+            JOptionPane.YES_NO_OPTION
+        );
+
+        // ===== APPLY PALETTE TO PANE ITSELF =====
+        pane.setBackground(ThemeManager.SURFACE);
+        pane.setForeground(ThemeManager.TEXT);
+
+        // ===== CREATE DIALOG FROM PANE =====
+        javax.swing.JDialog dialog = pane.createDialog(parent, title);
+        dialog.setBackground(ThemeManager.SURFACE);
+
+        // ===== RECURSE INTO ALL CHILD COMPONENTS AND THEME THEM =====
+        themeFileChooserComponents(dialog);
+
+        // ===== STYLE BUTTONS SPECIFICALLY (Yes / No) =====
+        themeOptionPaneButtons(dialog);
+
+        dialog.setVisible(true);
+
+        // ===== EXTRACT RESULT =====
+        Object result = pane.getValue();
+        if (result instanceof Integer val) return val;
+
+        // User closed dialog without choosing - treat as NO
+        return JOptionPane.NO_OPTION;
+    }
+
+    // ===== THEME OPTION PANE BUTTONS =====
+    // Recurses into dialog to find and style JButtons (Yes/No/OK/Cancel)
+    private static void themeOptionPaneButtons(java.awt.Container container) {
+        for (Component comp : container.getComponents()) {
+            if (comp instanceof JButton btn) {
+                // ===== APPLY ACCENT BUTTON STYLE TO DIALOG BUTTONS =====
+                btn.setBackground(ThemeManager.SURFACE2);
+                btn.setForeground(ThemeManager.TEXT);
+                btn.setFocusPainted(false);
+                btn.setBorderPainted(false);
+                btn.setOpaque(true);
+                btn.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+
+                // ===== HOVER EFFECT =====
+                btn.addMouseListener(new java.awt.event.MouseAdapter() {
+                    public void mouseEntered(java.awt.event.MouseEvent e) { btn.setBackground(ThemeManager.BORDER); }
+                    public void mouseExited (java.awt.event.MouseEvent e) { btn.setBackground(ThemeManager.SURFACE2); }
+                });
+            }
+            // ===== RECURSE INTO NESTED CONTAINERS =====
+            if (comp instanceof java.awt.Container nested) {
+                themeOptionPaneButtons(nested);
             }
         }
     }
