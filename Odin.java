@@ -105,6 +105,7 @@ public class Odin {
     public void buildMainUI(List<Image> icons) {
         mainFrame = new JFrame("Odin's Runa");
         mainFrame.setBackground(ThemeManager.BG);
+        ThemeManager.applyOptionPaneTheme();
         if (DATABASE_TYPE.equals("m")) {
             mainFrame.setTitle("Odin's Runa  -  " + username);
         }
@@ -1485,7 +1486,7 @@ public class Odin {
                 if (mode.equals("update")) {
                     backend.updateEntry(conn, addupdate_id, tagField.getText().toCharArray(), dataFields, folderId);
                 } else {
-                    backend.addEntry(conn, tagField.getText().toCharArray(), selectedType.typeKey, dataFields, DATABASE_TYPE, creationDate, revisionDate, folderId);
+                    backend.addEntry(conn, tagField.getText().toCharArray(), selectedType.typeKey.toCharArray(), dataFields, DATABASE_TYPE, creationDate, revisionDate, folderId);
                 }
 
                 for (char[] d : dataFields) if (d != null) Yggdrasil.wipeCharArray(d);
@@ -1689,26 +1690,44 @@ public class Odin {
 
     // ===== DELETE ENTRY =====
     private void deleteEntry() {
-        int row = table.getSelectedRow();
-        if (row == -1) return;
+        // ===== GET ALL SELECTED ROW INDICES =====
+        int[] rows = table.getSelectedRows();
 
-        int confirm = JOptionPane.showConfirmDialog(mainFrame,
-            "Delete selected entry?", "Confirm Delete", JOptionPane.YES_NO_OPTION);
+        // No selection - nothing to do
+        if (rows.length == 0) return;
 
+        // ===== CONFIRM DELETION - show count so user knows scope =====
+        int confirm = ThemeManager.showThemedConfirm(mainFrame,
+    "Delete " + rows.length + " selected entr" + (rows.length == 1 ? "y" : "ies") + "?",
+    "Confirm Delete");
+    
         if (confirm == JOptionPane.YES_OPTION) {
             try {
-                int id = (int) model.getValueAt(row, 0);
-                databaseutilities.deleteEntry(conn, id);
+                // ===== COLLECT IDs BEFORE DELETION =====
+                // Rows must be collected upfront - indices shift as rows are removed
+                // Sort descending so removal from bottom up doesn't affect upper indices
+                int[] sortedRows = rows.clone();
+                java.util.Arrays.sort(sortedRows);
+
+                // ===== DELETE EACH SELECTED ENTRY BY ID =====
+                for (int i = sortedRows.length - 1; i >= 0; i--) {
+                    int id = (int) model.getValueAt(sortedRows[i], 0);
+                    databaseutilities.deleteEntry(conn, id);
+                }
+
+                // ===== RELOAD STATE AFTER ALL DELETES =====
                 credentials = backend.loadAll(conn);
                 refreshTable();
-                // ===== Clear detail panel after delete =====
+
+                // ===== CLEAR DETAIL PANEL AFTER DELETE =====
                 detailContent.removeAll();
                 detailContent.revalidate();
                 detailContent.repaint();
-                ToastManager.info(mainFrame, "Entry deleted.");
+
+                ToastManager.info(mainFrame, rows.length + " entr" + (rows.length == 1 ? "y" : "ies") + " deleted.");
             } catch (Exception e) {
                 e.printStackTrace();
-                ToastManager.error(mainFrame, "Failed to delete entry.");
+                ToastManager.error(mainFrame, "Failed to delete entries.");
             }
         }
     }
