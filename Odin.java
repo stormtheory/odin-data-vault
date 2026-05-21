@@ -1485,7 +1485,7 @@ public class Odin {
                 if (mode.equals("update")) {
                     backend.updateEntry(conn, addupdate_id, tagField.getText().toCharArray(), dataFields, folderId);
                 } else {
-                    backend.addEntry(conn, tagField.getText().toCharArray(), selectedType.typeKey, dataFields, DATABASE_TYPE, creationDate, revisionDate, folderId);
+                    backend.addEntry(conn, tagField.getText().toCharArray(), selectedType.typeKey.toCharArray(), dataFields, DATABASE_TYPE, creationDate, revisionDate, folderId);
                 }
 
                 for (char[] d : dataFields) if (d != null) Yggdrasil.wipeCharArray(d);

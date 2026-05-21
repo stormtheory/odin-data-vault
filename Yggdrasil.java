@@ -395,13 +395,12 @@ public class Yggdrasil {
             while (rs.next()) {
                 Credential c = new Credential();
                 c.id    = rs.getInt("id");
-                c.type  = rs.getString("type");
                 c.iv    = rs.getBytes("iv");
-
-                // Decrypt tag and notes — needed for table display without on-demand
+                
+                // Decrypt type and tag — needed for table display without on-demand
+                c.type  = new String(decryptData(rs.getBytes("type"),   c.iv, Vault_Use_Key));
                 c.tag   = decryptData(rs.getBytes("tag"),   c.iv, Vault_Use_Key);
-                //c.notes = decryptData(rs.getBytes("notes"), c.iv, Vault_Use_Key);
-
+                
                 // Store all data fields as encrypted bytes — not decrypted until needed
                 for (int i = 0; i < Futhark.DATA_COLUMNS.length; i++) {
                     c.dataFields[i] = rs.getBytes(Futhark.DATA_COLUMNS[i]);
@@ -416,9 +415,9 @@ public class Yggdrasil {
     // ===== ADD ENTRY =====
     // Encrypts all fields and writes one row to the vault table.
     // dataFields array maps index 0→data0, 1→data1, ... 8→data8
-    protected void addEntry(Connection conn, char[] tag, String type, char[][] dataFields, String dbType, String creationDate, String revisionDate, String folderId) throws Exception {
+    protected void addEntry(Connection conn, char[] tag, char[] type, char[][] dataFields, String dbType, String creationDate, String revisionDate, String folderId) throws Exception {
         byte[] iv = generateIV(); // single IV per row
-
+        byte[] enc_type   = encryptData(type,   iv, Vault_Use_Key);
         byte[] enc_tag   = encryptData(tag,   iv, Vault_Use_Key);
 
         // Encrypt each data field — null slots write SQL NULL
@@ -435,7 +434,7 @@ public class Yggdrasil {
         String sql = "INSERT INTO vault(type, tag, data0, data1, data2, data3, data4, data5, data6, data7, data8, creationDate, revisionDate, folderId, iv) " +
                      "VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, type);
+            stmt.setBytes(1, enc_type);
             stmt.setBytes(2,  enc_tag);
             for (int i = 0; i < 8; i++) {
                 stmt.setBytes(i + 3, enc_data[i]); // null → SQL NULL via JDBC
@@ -565,7 +564,7 @@ public class Yggdrasil {
         stmt.execute("""
             CREATE TABLE IF NOT EXISTS vault (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                type         TEXT,
+                type         BLOB,
                 favorite     INTEGER NOT NULL DEFAULT 0 CHECK (favorite IN (0, 1)),
                 folderId     BLOB,
                 tag          BLOB,
