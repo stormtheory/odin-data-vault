@@ -388,7 +388,7 @@ public class Yggdrasil {
         wipeCredentialList(credentials, false, DEBUG); // wipe previous list before replacing
         List<Credential> result = new ArrayList<>();
 
-        String sql = "SELECT id, type, tag, data0, data1, data2, data3, data4, data5, data6, data7, data8, iv FROM vault";
+        String sql = "SELECT id, type, tag, data0, data1, data2, data3, data4, data5, data6, data7, data8, creationDate, revisionDate, iv FROM vault";
         try (PreparedStatement stmt = conn.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
 
@@ -400,6 +400,8 @@ public class Yggdrasil {
                 // Decrypt type and tag — needed for table display without on-demand
                 c.type  = new String(decryptData(rs.getBytes("type"),   c.iv, Vault_Use_Key));
                 c.tag   = decryptData(rs.getBytes("tag"),   c.iv, Vault_Use_Key);
+                c.creationDate  = new String(decryptData(rs.getBytes("creationDate"),   c.iv, Vault_Use_Key));
+                c.revisionDate  = new String(decryptData(rs.getBytes("revisionDate"),   c.iv, Vault_Use_Key));
                 
                 // Store all data fields as encrypted bytes — not decrypted until needed
                 for (int i = 0; i < Futhark.DATA_COLUMNS.length; i++) {
@@ -417,8 +419,14 @@ public class Yggdrasil {
     // dataFields array maps index 0→data0, 1→data1, ... 8→data8
     protected void addEntry(Connection conn, char[] tag, char[] type, char[][] dataFields, String dbType, String creationDate, String revisionDate, String folderId) throws Exception {
         byte[] iv = generateIV(); // single IV per row
-        byte[] enc_type   = encryptData(type,   iv, Vault_Use_Key);
+        byte[] enc_type  = encryptData(type,  iv, Vault_Use_Key);
         byte[] enc_tag   = encryptData(tag,   iv, Vault_Use_Key);
+
+        if (creationDate == null || creationDate.isEmpty() || creationDate.isBlank()) creationDate = timeCheck_UTC_time();
+        if (revisionDate == null || revisionDate.isEmpty() || revisionDate.isBlank()) revisionDate = creationDate;
+
+        byte[] enc_cd   = encryptData(creationDate.toCharArray(),   iv, Vault_Use_Key);
+        byte[] enc_rd   = encryptData(revisionDate.toCharArray(),   iv, Vault_Use_Key);
 
         // Encrypt each data field — null slots write SQL NULL
         byte[][] enc_data = new byte[Futhark.DATA_COLUMNS.length][];
@@ -426,10 +434,7 @@ public class Yggdrasil {
             if (dataFields[i] != null && dataFields[i].length > 0) {
                 enc_data[i] = encryptData(dataFields[i], iv, Vault_Use_Key);
             }
-        }
-        if (creationDate == null || creationDate.isEmpty() || creationDate.isBlank()) creationDate = timeCheck_UTC_time();
-        if (revisionDate == null || revisionDate.isEmpty() || revisionDate.isBlank()) revisionDate = timeCheck_UTC_time();
-            
+        }            
 
         String sql = "INSERT INTO vault(type, tag, data0, data1, data2, data3, data4, data5, data6, data7, data8, creationDate, revisionDate, folderId, iv) " +
                      "VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
@@ -439,8 +444,8 @@ public class Yggdrasil {
             for (int i = 0; i < 8; i++) {
                 stmt.setBytes(i + 3, enc_data[i]); // null → SQL NULL via JDBC
             }
-            stmt.setString(12, creationDate);
-            stmt.setString(13, revisionDate);
+            stmt.setBytes(12, enc_cd);
+            stmt.setBytes(13, enc_rd);
             stmt.setString(14, folderId);
             stmt.setBytes(15, iv);
             stmt.executeUpdate();
@@ -581,6 +586,17 @@ public class Yggdrasil {
                 data10       BLOB,
                 creationDate BLOB,
                 revisionDate BLOB,
+                iv           BLOB
+            )
+        """);
+
+        stmt.execute("""
+            CREATE TABLE IF NOT EXISTS folders (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                folderId     BLOB,
+                name         BLOB,
+                desc         BLOB,
+                color        INTEGER,
                 iv           BLOB
             )
         """);

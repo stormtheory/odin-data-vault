@@ -121,10 +121,11 @@ No external database or installer required, unless you want it.
 
 **[ New Features ]**
 * -Search/filter functionality-
-* Encrypt datatype
+* -Encrypt item data type-
+* Multiple item delete
 * Passphrase Generator
-* "revisionDate": "2025-07-30T23:37:16.386Z",
-* "creationDate": "2025-02-09T00:40:38.286Z",
+* -"revisionDate": "2025-07-30T23:37:16.386Z",-
+* -"creationDate": "2025-02-09T00:40:38.286Z",-
 * "folders":  
 * "totp":
 
