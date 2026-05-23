@@ -495,14 +495,14 @@ echo [Build] JDK !_VER! -^> !_OUTJAR!/.vbs
 echo ============================================================
 
 :: -- Clean previous artifacts for this version --
-echo [1/7] Cleaning build artifacts for JDK !_VER!...
+echo [1/8] Cleaning build artifacts for JDK !_VER!...
 if exist "bin_!_VER!" rd /s /q "bin_!_VER!"
 if exist "!_OUTJAR!" del /q "!_OUTJAR!"
 if exist "!_STAGE!" rmdir /s /q "!_STAGE!"
 
 :: -- Compile all .java sources with this JDK into a version-specific bin dir --
 ::   -encoding UTF-8 prevents unmappable character errors on Windows codepages
-echo [2/7] Compiling with javac !_VER!...
+echo [2/8] Compiling with javac !_VER!...
 mkdir "bin_!_VER!" 2>nul
 "!_JAVAC!" -encoding UTF-8 -cp ".;lib\%SQLITE_LIB%;lib\%PDF_LIB%;lib\%JSON_LIB%;lib\%ARGON2_LIB%;lib\%ARGON2_NOLIB%;lib\%BOUNCY_HOUSE_LIB%;lib\%JNA_LIB%" -d "bin_!_VER!" *.java
 if errorlevel 1 (
@@ -513,13 +513,16 @@ if errorlevel 1 (
 
 :: -- Stage compiled classes into isolated fat jar directory --
 ::   Each version gets its own _STAGE dir so builds never cross-contaminate
-echo [3/7] Staging classes...
+echo [3/8] Staging classes...
 mkdir "!_STAGE!"
 xcopy /e /i "bin_!_VER!" "!_STAGE!" >nul
+xcopy /e /i icons "!_STAGE!" >nul
+xcopy /i README.md "!_STAGE!" >nul
+xcopy /i LICENSE "!_STAGE!" >nul
 
 :: -- Explode dependency jars into staging dir --
 ::   jar xf extracts all entries from each dep into the current directory
-echo [4/7] Exploding dependencies...
+echo [4/8] Exploding dependencies...
 cd "!_STAGE!"
 "!_JAR!" xf "..\lib\%SQLITE_LIB%"
 "!_JAR!" xf "..\lib\%ARGON2_LIB%"
@@ -533,13 +536,13 @@ cd ..
 :: -- Strip BouncyCastle signature files to prevent JAR verification failure --
 ::   BouncyCastle ships signed; its .SF/.RSA/.DSA files invalidate the fat jar
 ::   because the merged classes no longer match the original signature hashes.
-echo [5/7] Stripping signature files...
+echo [5/8] Stripping signature files...
 if exist "!_STAGE!\META-INF\*.SF"  del /q "!_STAGE!\META-INF\*.SF"
 if exist "!_STAGE!\META-INF\*.RSA" del /q "!_STAGE!\META-INF\*.RSA"
 if exist "!_STAGE!\META-INF\*.DSA" del /q "!_STAGE!\META-INF\*.DSA"
 
 :: -- Write manifest - trailing blank line after Main-Class is required by JAR spec --
-echo [6/7] Writing manifest...
+echo [6/8] Writing manifest...
 if not exist "!_STAGE!\META-INF" mkdir "!_STAGE!\META-INF"
 (
     echo Manifest-Version: 1.0
@@ -548,12 +551,13 @@ if not exist "!_STAGE!\META-INF" mkdir "!_STAGE!\META-INF"
 ) > "!_STAGE!\META-INF\MANIFEST.MF"
 
 :: -- Package everything into the final fat jar - slowest step --
-echo [7/7] Packaging !_OUTJAR!...
+echo [7/8] .jar Packaging !_OUTJAR!...
 cd "!_STAGE!"
 "!_JAR!" cfm "..\!_OUTJAR!" META-INF\MANIFEST.MF .
 cd ..
 
 :: -- Generate a windowless .vbs launcher alongside this jar --
+echo [8/8] .vbs Packaging
 call :MAKE_RELEASE_LAUNCHER "!_OUTJAR!"
 
 echo [Done] !_OUTJAR! created.
@@ -689,8 +693,11 @@ call :BUILD
 :: Step 3 – explode dependency jars into staging directory
 echo [3/8] Staging class files...
 mkdir fatjar
-:: xcopy /e /i copies class tree from bin into fatjar
+:: xcopy /e /i copies class tree and needed files into fatjar
 xcopy /e /i bin fatjar >nul
+xcopy /e /i icons fatjar >nul
+xcopy /i README.md fatjar >nul
+xcopy /i LICENSE fatjar >nul
 :: Explode each dependency jar - these are the slow steps on large jars
 echo [4/8] Exploding dependency jars ^(this may take a moment^)...
 cd fatjar
@@ -730,7 +737,7 @@ echo [7/8] Packaging fat jar ^(slowest step - packing all classes^)...
 cd fatjar
 "%JAR_EXE%" cfm "..\%JAR_FILENAME%" META-INF\MANIFEST.MF .
 cd ..
-echo [7/8] Done -- %JAR_FILENAME% created.
+echo Done -- %JAR_FILENAME% created.
 
 :: Step 7 – generate .vbs launcher and fix file association
 echo [8/8] Writing launcher and registering file association...

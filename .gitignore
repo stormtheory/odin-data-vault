@@ -2,5 +2,6 @@ bin/*
 bin/fatjar
 bin/JavaPasswordVault.jar
 JavaPasswordVault.jar
+OdinDataVault.jar
 fatjar
 vault.db
