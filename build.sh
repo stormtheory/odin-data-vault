@@ -111,6 +111,8 @@ JAR(){
     # ===== Build fat jar =====
     mkdir -p fatjar
     cp -r bin/* fatjar/
+    cp -r icons fatjar/
+    cp README.md LICENSE fatjar/
     cd fatjar && jar xf ../lib/$SQLITE_LIB && jar xf ../lib/$ARGON2_LIB && jar xf ../lib/$ARGON2_NOLIB && jar xf ../lib/$JNA_LIB && jar xf ../lib/$BOUNCY_HOUSE_LIB && cd ..
 
     # ===== Strip signature files - required for signed JARs like Bouncy Castle =====

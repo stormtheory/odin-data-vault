@@ -689,8 +689,11 @@ call :BUILD
 :: Step 3 – explode dependency jars into staging directory
 echo [3/8] Staging class files...
 mkdir fatjar
-:: xcopy /e /i copies class tree from bin into fatjar
+:: xcopy /e /i copies class tree and needed files into fatjar
 xcopy /e /i bin fatjar >nul
+xcopy /e /i icons fatjar >nul
+xcopy /i README.md fatjar >nul
+xcopy /i LICENSE fatjar >nul
 :: Explode each dependency jar - these are the slow steps on large jars
 echo [4/8] Exploding dependency jars ^(this may take a moment^)...
 cd fatjar
