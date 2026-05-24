@@ -162,7 +162,7 @@ public class Odin {
                 // ===== DOUBLE CLICK - copy field to clipboard =====
                 if (e.getClickCount() == 2) {
                     if (col == 0) return; // ===== Never copy hidden ID column =====
-                    copyFieldToClipboard(row, col);
+                    copyFieldToClipboard((Integer) model.getValueAt(row, 0) - 1, col);
                 }
             }
         });
