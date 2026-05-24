@@ -63,6 +63,7 @@ Upon class project completion, the project was compared to Bitwarden, after read
 * **Per-entry IV:** Each username and password sets use a unique random IV making all data look unique when encrypted
 
 **[ Vault Standards: ]**
+* Search/filter functionality
 * In **single-user mode:** keys are only derived at runtime and never persisted to disk in any form
 * In **multi-user mode:** shared keys are stored encrypted only, but never in a decryptable state at rest
 * Sensitive data is **scrubbed/zero'd from memory** as soon as it is no longer needed, minimizing the in-memory exposure window
@@ -120,20 +121,17 @@ No external database or installer required, unless you want it.
 ## 🚀 Future Improvements
 
 **[ New Features ]**
-* -Search/filter functionality-
-* -Encrypt item data type-
 * Multiple item delete
 * Passphrase Generator
-* -"revisionDate": "2025-07-30T23:37:16.386Z",-
-* -"creationDate": "2025-02-09T00:40:38.286Z",-
 * "folders":  
 * "totp":
 
 **[ Big Ticket Items ]**
 * Browser Extension for Firefox and Chrome **(Looking into but maybe not be up to the level of security and privacy worth doing)**
 * iOS App
-* -Export to Bitwarden-
 * Local encrypted file storage - Store encrypted documents and photos
+
+* // Make change to changing vault key to add in redo server table (Not used yet)
 
 **[[ Long-term Goal ]]**
 **[[[ Server-Based Option ]]]**
@@ -141,10 +139,15 @@ No external database or installer required, unless you want it.
 * All encryption and key generation happens locally on the user's device, data is always encrypted before it ever touches a network
 * The master password never leaves the device in any form, not even hashed or partially transmitted
 * Encryption keys are derived and held client-side only, the server is just a locked-down storage device with no ability to decrypt your vault
-* Vault data stored on disk is always encrypted, there is no plaintext-at-rest state under any condition
 * In single-user mode, keys are only derived at runtime and never persisted to disk in any form
 * In multi-user mode, shared keys are stored encrypted only, but never in a decryptable state at rest
+
+**[[[ Storage-Server ]]]**
 * Sensitive data is scrubbed/zero'd from memory as soon as it is no longer needed, minimizing the in-memory exposure window
+* On server encrypted data partitions, running the whole server and the encrypted data vaults on fully encrypted partitions.
+* Temporary logs only on RAM.
+* Production servers maybe Read-Only.
+* Vault data stored on disk is always encrypted, there is no plaintext-at-rest state under any condition
 
 ---
 

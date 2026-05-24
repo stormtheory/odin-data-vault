@@ -1480,8 +1480,8 @@ public class Odin {
                     }
                 }
 
-                String creationDate=" "; // PlaceHolders
-                String revisionDate=" "; // PlaceHolders
+                String creationDate=" "; // PlaceHolders // gets filled on the other side if blank
+                String revisionDate=" "; // PlaceHolders // gets filled on the other side if blank
                 String folderId=" "; // PlaceHolders
                 if (mode.equals("update")) {
                     backend.updateEntry(conn, addupdate_id, tagField.getText().toCharArray(), dataFields, folderId);
