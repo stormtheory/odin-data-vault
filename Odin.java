@@ -156,7 +156,7 @@ public class Odin {
 
                 // ===== ROW SELECTION - show detail panel =====
                 if (e.getClickCount() == 1) {
-                    showDetailPanel(row);
+                    showDetailPanel((Integer) model.getValueAt(row, 0) - 1);
                 }
 
                 // ===== DOUBLE CLICK - copy field to clipboard =====
@@ -622,7 +622,7 @@ public class Odin {
 
         Yggdrasil.Credential c    = credentials.get(credIndex);
         Futhark.EntryType    type = Futhark.forKey(c.type);
-        if (DEBUG) System.out.println("Detail type: " + type + "  ID: " + c.id + "  C: " + c.type);
+        if (DEBUG) System.out.println("Detail type: " + type + "  ID: " + c.id + "  ROW: " + row + "  C: " + c.type);
 
         detailContent.removeAll();
         detailContent.setBorder(BorderFactory.createEmptyBorder(10, 16, 10, 16));
@@ -1050,11 +1050,12 @@ public class Odin {
                 table.getColumnModel().getColumn(0).setMinWidth(0);
                 table.getColumnModel().getColumn(0).setMaxWidth(0);
             }
-        }
+        
         // ===== HIDE TYPE COLUMN =====
         if (table.getColumnModel().getColumnCount() > 1) {
             table.getColumnModel().getColumn(1).setMinWidth(0);
             table.getColumnModel().getColumn(1).setMaxWidth(0);
+        }
         }
 
         // ===== POPULATE ROWS =====

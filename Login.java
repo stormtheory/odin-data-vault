@@ -178,6 +178,7 @@ public class Login extends JFrame {
                     break;
                 case "--test": // DO NOT USE FOR PRODUCTION FOR DEVELOPER TESTING ONLY
                     theme_override = "dark";
+                    DEBUG = true;
                     PASSWORD_LENGTH = 3;
                     arg_VaultLevel = true;
                     VaultLevel = "PARANOID";
