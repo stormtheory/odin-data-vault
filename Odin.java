@@ -684,6 +684,7 @@ public class Odin {
                     } catch (Exception e) {
                         addDetailField(field.label, "[decrypt error]", false, row, i);
                     }
+                    detailContent.add(Box.createVerticalStrut(6));
                 }
             }
         }
@@ -1371,6 +1372,7 @@ public class Odin {
                 if (credIndex >= 0) {
                     Yggdrasil.Credential c        = credentials.get(credIndex);
                     Futhark.EntryType    type     = Futhark.forKey(c.type);
+                    String creationDate = c.creationDate;
 
                     // ===== TAG - always present =====
                     tagField.setText(new String(c.tag));
@@ -1485,7 +1487,7 @@ public class Odin {
                 String revisionDate=" "; // PlaceHolders // gets filled on the other side if blank
                 String folderId=" "; // PlaceHolders
                 if (mode.equals("update")) {
-                    backend.updateEntry(conn, addupdate_id, tagField.getText().toCharArray(), dataFields, folderId);
+                    backend.updateEntry(conn, addupdate_id, tagField.getText().toCharArray(), dataFields, folderId, selectedType.typeKey.toCharArray(), creationDate);
                 } else {
                     backend.addEntry(conn, tagField.getText().toCharArray(), selectedType.typeKey.toCharArray(), dataFields, DATABASE_TYPE, creationDate, revisionDate, folderId);
                 }

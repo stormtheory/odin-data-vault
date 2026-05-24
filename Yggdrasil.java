@@ -412,7 +412,7 @@ public class Yggdrasil {
         wipeCredentialList(credentials, false, DEBUG); // wipe previous list before replacing
         List<Credential> result = new ArrayList<>();
 
-        String sql = "SELECT id, type, tag, data0, data1, data2, data3, data4, data5, data6, data7, data8, creationDate, revisionDate, iv FROM vault";
+        String sql = "SELECT id, type, tag, data0, data1, data2, data3, data4, data5, data6, data7, data8, folderId, creationDate, revisionDate, iv FROM vault";
         try (PreparedStatement stmt = conn.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
 
@@ -424,6 +424,7 @@ public class Yggdrasil {
                 // Decrypt type and tag — needed for table display without on-demand
                 c.type  = new String(decryptData(rs.getBytes("type"),   c.iv, Vault_Use_Key));
                 c.tag   = decryptData(rs.getBytes("tag"),   c.iv, Vault_Use_Key);
+                c.folderId = new String(decryptData(rs.getBytes("folderId"),   c.iv, Vault_Use_Key));
                 c.creationDate  = new String(decryptData(rs.getBytes("creationDate"),   c.iv, Vault_Use_Key));
                 c.revisionDate  = new String(decryptData(rs.getBytes("revisionDate"),   c.iv, Vault_Use_Key));
                 
@@ -477,6 +478,7 @@ public class Yggdrasil {
             stmt.setBytes(14, enc_fI);
             stmt.setBytes(15, iv);
             stmt.executeUpdate();
+            if (DEBUG) System.out.println("Data Saved.");
         }
 
         // Wipe all temporary sensitive arrays immediately after write
@@ -489,9 +491,13 @@ public class Yggdrasil {
 
 
     
-    protected void updateEntry(Connection conn, int id, char[] tag, char[][] dataFields, String folderId) throws Exception {
-        byte[] iv = generateIV(); // single IV per row
-        byte[] enc_tag   = encryptData(tag,   iv, Vault_Use_Key);
+    protected void updateEntry(Connection conn, int id, char[] tag, char[][] dataFields, String folderId, char[] type, String creationDate) throws Exception {
+        byte[] iv = generateIV();
+        byte[] enc_type = encryptData(type, iv, Vault_Use_Key);
+        byte[] enc_cD = encryptData(creationDate.toCharArray(), iv, Vault_Use_Key);
+        byte[] enc_rD = encryptData(timeCheck_UTC_time().toCharArray(), iv, Vault_Use_Key);
+        byte[] enc_fI = encryptData(folderId.toCharArray(), iv, Vault_Use_Key);
+        byte[] enc_tag = encryptData(tag, iv, Vault_Use_Key);
 
         // Encrypt each data field — null slots write SQL NULL
         byte[][] enc_data = new byte[Futhark.DATA_COLUMNS.length][];
@@ -500,22 +506,23 @@ public class Yggdrasil {
                 enc_data[i] = encryptData(dataFields[i], iv, Vault_Use_Key);
             }
         }
-        String revisionDate = timeCheck_UTC_time();
 
-        String sql = "UPDATE vault SET tag=?, data0=?, data1=?, data2=?, data3=?, data4=?, data5=?, data6=?, data7=?, data8=?, revisionDate=?, folderId=?, iv=? WHERE id=?";
+        String sql = "UPDATE vault SET tag=?, data0=?, data1=?, data2=?, data3=?, data4=?, data5=?, data6=?, data7=?, data8=?, type=?, creationDate=?, revisionDate=?, folderId=?, iv=? WHERE id=?";
 
         try (PreparedStatement update = conn.prepareStatement(sql)) {
             update.setBytes(1,  enc_tag);       // tag
             for (int i = 0; i < 9; i++) {
-                update.setBytes(i + 2, enc_data[i]); // data0..data8 = indices 2..9
+                update.setBytes(i + 2, enc_data[i]); // data0..data8 = indices 2..10
             }
-            update.setString(11, revisionDate);
-            update.setString(12, folderId);
-            update.setBytes(13, iv);
-            update.setInt(14,   id);            // WHERE id = ?  (always last)
+            update.setBytes(11, enc_type);
+            update.setBytes(12, enc_cD);
+            update.setBytes(13, enc_rD);
+            update.setBytes(14, enc_fI);
+            update.setBytes(15, iv);
+            update.setInt(16,   id);            // WHERE id = ?  (always last)
             update.executeUpdate();
         }
-
+        if (DEBUG) System.out.println("Data Saved.");
         // Wipe all temporary sensitive arrays immediately after write
         wipeCharArray(tag);
         for (char[] d : dataFields) if (d != null) wipeCharArray(d);
@@ -558,6 +565,7 @@ public class Yggdrasil {
             insert.setInt(6,    profile.memoryKb());
             insert.setInt(7,    profile.parallelism());
             insert.executeUpdate();
+            if (DEBUG) System.out.println("Data Saved.");
         }
 
         wipeByteArray(new_User_AES_Key);
