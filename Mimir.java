@@ -2,6 +2,8 @@ import java.io.File;
 import java.security.SecureRandom;
 import java.sql.*;
 
+import org.bouncycastle.util.Bytes;
+
 public class Mimir 
 {
     public static void registerShutdownHook(boolean isWindows, boolean DEBUG) {
@@ -127,6 +129,8 @@ public class Mimir
         //System.out.println("[SQLite] tmpdir -> " + sqliteTmp);
     }
 
+    // ##################################### META ########################################################################################
+    // ##################################### TEXT ########################################################################################
     protected static String Pull_DB_Text_Meta_item(Connection conn, String key) throws Exception {
         String sql = "SELECT Tvalue FROM meta WHERE key = ?";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -139,7 +143,6 @@ public class Mimir
             }
         }
     }
-
     protected static void Update_DB_Text_Meta_item(Connection conn, String key, String value) throws Exception {
         String sql = "UPDATE meta SET Tvalue = ? WHERE key = ?";
         try (PreparedStatement update = conn.prepareStatement(sql)) {
@@ -151,6 +154,34 @@ public class Mimir
             }
         }
     }
+
+// ##################################### META ########################################################################################
+// ##################################### BLOB ########################################################################################
+    protected static byte[] Pull_DB_Blob_Meta_item(Connection conn, String key) throws Exception {
+        String sql = "SELECT Bvalue FROM meta WHERE key = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, key);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (!rs.next()) {
+                    throw new IllegalStateException("Meta key not found: " + key);
+                }
+                return rs.getBytes(1);
+            }
+        }
+    }
+    protected static void Update_DB_Blob_Meta_item(Connection conn, String key, byte[] value) throws Exception {
+        String sql = "UPDATE meta SET Bvalue = ? WHERE key = ?";
+        try (PreparedStatement update = conn.prepareStatement(sql)) {
+            update.setBytes(1, value);
+            update.setString(2, key);
+            int rows = update.executeUpdate();
+            if (rows == 0) {
+                throw new IllegalStateException("Update affected 0 rows - key not found: " + key);
+            }
+        }
+    }
+
+
     // ===== DELETE ENTRY ===== ----- Yup
     protected void deleteEntry(Connection conn, int id) throws Exception {
         String sql = "DELETE FROM vault WHERE id = ?";

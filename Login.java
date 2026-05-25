@@ -1,5 +1,6 @@
 import java.awt.*;
 import java.io.File;
+import java.net.URL;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.util.ArrayList;
@@ -14,6 +15,7 @@ public class Login extends JFrame {
     private static int    PASSWORD_LENGTH = 12; // Default for Vault Creation and Changes   // 12 is the safest with all Argon2id levels
 
     // ===== STARTUP STATE =====
+    private static Boolean      notInAJar       = false;
     private static boolean      arg_vaultPath   = false;
     private static boolean      arg_VaultLevel  = false;
     private static String       vaultPath;
@@ -176,6 +178,7 @@ public class Login extends JFrame {
                     break;
                 case "--test": // DO NOT USE FOR PRODUCTION FOR DEVELOPER TESTING ONLY
                     theme_override = "dark";
+                    DEBUG = true;
                     PASSWORD_LENGTH = 3;
                     arg_VaultLevel = true;
                     VaultLevel = "PARANOID";
@@ -202,31 +205,63 @@ public class Login extends JFrame {
         // ===== LOAD ICONS =====
         // Load multiple sizes - OS picks best for taskbar, alt-tab, title bar
         List<Image> icons = new ArrayList<>();
-        String[] iconSizes = {"icons/icon_16.png", "icons/icon_32.png",
-                              "icons/icon_64.png", "icons/icon_256.png"};
+        String[] iconSizesFolder = {"icons/icon_256.png", "icons/icon_32.png",
+                              "icons/icon_64.png", "icons/icon_16.png"};
+        
+        String[] iconSizesJar = {"icons/icon_256.png"};
 
-        File appiconFile = new File("icons/password_manager_icon58.png");
-        if (appiconFile.exists()) {
-            icons.add(new ImageIcon(appiconFile.getAbsolutePath()).getImage());
-            Image scaled = new ImageIcon(appiconFile.getAbsolutePath())
-                .getImage().getScaledInstance(64, 64, Image.SCALE_SMOOTH);
-            appIcon = new ImageIcon(scaled);
-        } else {
-            if (DEBUG) System.out.println("[Login] App icon not found: " + appiconFile.getAbsolutePath());
+        // Load all available icon sizes into the window icon list
+        for (String path : iconSizesJar) {
+            URL iconUrl = getClass().getResource(path);
+            if (iconUrl != null) {
+               Image rawImage = new ImageIcon(iconUrl).getImage();
+                if (path.contains("256") && dialogIcon == null) {
+                    Image scaled = rawImage.getScaledInstance(64, 64, Image.SCALE_SMOOTH);
+                    dialogIcon = new ImageIcon(scaled);
+                }
+            } else {
+                if (DEBUG) System.out.println("[Login] Icon not found in JAR: " + path);
+                notInAJar = true;
+                System.out.println("Not in a Jar");
+                break;
+            }
         }
 
-        for (String path : iconSizes) {
+        // Load the main application icon used for scaled display (e.g. taskbar, title bar)
+        if (!notInAJar){
+        URL appIconUrl = getClass().getResource("icons/password_manager_icon58.png");
+        if (appIconUrl != null) {
+            Image rawImage = new ImageIcon(appIconUrl).getImage();
+            icons.add(rawImage);
+            Image scaled = rawImage.getScaledInstance(64, 64, Image.SCALE_SMOOTH);
+            appIcon = new ImageIcon(scaled);
+        } else {
+            if (DEBUG) System.out.println("[Login] App icon not found in JAR: password_manager_icon58.png");
+            notInAJar = true;
+            System.out.println("Not in a Jar");
+        }}
+
+        if (notInAJar){
+        for (String path : iconSizesFolder) {
             File iconFile = new File(path);
             if (iconFile.exists()) {
                 // ===== Use 256px version scaled down for dialogs - only set once =====
                 if (path.contains("256") && dialogIcon == null) {
-                    Image scaled = new ImageIcon(iconFile.getAbsolutePath())
-                        .getImage().getScaledInstance(64, 64, Image.SCALE_SMOOTH);
+                    Image scaled = new ImageIcon(iconFile.getAbsolutePath()).getImage().getScaledInstance(64, 64, Image.SCALE_SMOOTH);
                     dialogIcon = new ImageIcon(scaled);
                 }
             } else {
                 if (DEBUG) System.out.println("[Login] Dialog icon not found: " + iconFile.getAbsolutePath());
             }
+        }
+        File appiconFile = new File("icons/password_manager_icon58.png");
+        if (appiconFile.exists()) {
+            icons.add(new ImageIcon(appiconFile.getAbsolutePath()).getImage());
+            Image scaled = new ImageIcon(appiconFile.getAbsolutePath()).getImage().getScaledInstance(64, 64, Image.SCALE_SMOOTH);
+            appIcon = new ImageIcon(scaled);
+        } else {
+            if (DEBUG) System.out.println("[Login] App icon not found: " + appiconFile.getAbsolutePath());
+        }
         }
 
         // ===== NO VAULT FOUND =====
