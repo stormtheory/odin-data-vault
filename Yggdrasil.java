@@ -644,6 +644,7 @@ public class Yggdrasil {
                 address      BLOB,
                 username     BLOB,
                 passkey      BLOB,
+                syncDate     BLOB,
                 iv           BLOB
             )
         """);
