@@ -154,15 +154,23 @@ public class Odin {
                 if (DEBUG) System.out.println("ROW:" + row);
                 if (row < 0) return;
 
-                // ===== ROW SELECTION - show detail panel =====
+                // ===== RESOLVE CREDENTIAL BY DB ID - safe under filter/search =====
+                // model col 0 holds the DB id; find the matching credential by id directly.
+                // Using id-1 or visibleRowToCredentialIndex both break when search is active
+                // because the visible row count no longer matches the full list.
+                int dbId = (Integer) model.getValueAt(row, 0);
+                int credIndex = findCredentialIndexById(dbId);
+                if (credIndex < 0) return; // ===== Guard: no match found =====
+
+                // ===== SINGLE CLICK - show detail panel =====
                 if (e.getClickCount() == 1) {
-                    showDetailPanel((Integer) model.getValueAt(row, 0) - 1);
+                    showDetailPanel(credIndex);
                 }
 
                 // ===== DOUBLE CLICK - copy field to clipboard =====
                 if (e.getClickCount() == 2) {
                     if (col == 0) return; // ===== Never copy hidden ID column =====
-                    copyFieldToClipboard((Integer) model.getValueAt(row, 0) - 1, col);
+                    copyFieldToClipboard(credIndex, col);
                 }
             }
         });
@@ -219,6 +227,16 @@ public class Odin {
 
         mainFrame.setContentPane(root);
         mainFrame.setVisible(true);
+    }
+
+    // ===== FIND CREDENTIAL INDEX BY DATABASE ID =====
+    // Stable under any filter or search state - matches on id, not position.
+    // Returns -1 if not found.
+    private int findCredentialIndexById(int id) {
+        for (int i = 0; i < credentials.size(); i++) {
+            if (credentials.get(i).id == id) return i;
+        }
+        return -1;
     }
 
     // ===== SEARCH BAR =====
@@ -458,6 +476,7 @@ public class Odin {
                 // ===== CLICK - switch category =====
                 public void mouseClicked(MouseEvent e) {
                     currentTypeFilter = typeKey;
+                    if (DEBUG) System.out.println("Sidebar Click");
                     for (Component c : sidebar.getComponents()) {
                         if (c instanceof JPanel p && p != sidebar)
                             p.setBackground(ThemeManager.SURFACE);
@@ -614,15 +633,15 @@ public class Odin {
      * Populates the detail panel for the selected row.
      * Sensitive fields show with a Show/Hide button that decrypts on demand.
      */
-    private void showDetailPanel(int row) {
-        if (row < 0 || row >= credentials.size()) return;
+    private void showDetailPanel(int credIndex) {
+    if (credIndex < 0 || credIndex >= credentials.size()) return;
 
-        int credIndex = visibleRowToCredentialIndex(row);
+        //int credIndex = visibleRowToCredentialIndex(row);
         if (credIndex < 0) return;
 
         Yggdrasil.Credential c    = credentials.get(credIndex);
         Futhark.EntryType    type = Futhark.forKey(c.type);
-        if (DEBUG) System.out.println("Detail type: " + type + "  ID: " + c.id + "  ROW: " + row + "  C: " + c.type);
+        if (DEBUG) System.out.println("Detail type: " + type + "  ID: " + c.id + "  credIndex: " + credIndex + "  C: " + c.type);
 
         detailContent.removeAll();
         detailContent.setBorder(BorderFactory.createEmptyBorder(10, 16, 10, 16));
@@ -637,7 +656,7 @@ public class Odin {
         detailContent.add(Box.createVerticalStrut(10));
 
         if (type == null) {
-            addDetailField("Tag", new String(c.tag), false, row, -1);
+            addDetailField("Tag", new String(c.tag), false, credIndex, -1);
         } else {
             for (int i = 0; i < type.fields.size(); i++) {
                 Futhark.Field field    = type.fields.get(i);
@@ -656,14 +675,14 @@ public class Odin {
                             Yggdrasil.Credential fieldRefs = c;
                             byte[] data;
                             if (type.typeKey.equals("binary")) {data = fieldRefs.getDataField(3);} else {data = fieldRefs.getDataField(1);}
-                            addDetailSensitiveField(field.label, encBytes, c.iv, row, i, type.typeKey, false, data);
-                            } else {addDetailSensitiveField(field.label, encBytes, c.iv, row, i, type.typeKey, false, null);}
+                            addDetailSensitiveField(field.label, encBytes, c.iv, credIndex, i, type.typeKey, false, data);
+                            } else {addDetailSensitiveField(field.label, encBytes, c.iv, credIndex, i, type.typeKey, false, null);}
                     } else {
                         try {
                             char[] value = backend.decryptData(encBytes, c.iv);
-                            addDetailField(field.label, new String(value), true, row, i);
+                            addDetailField(field.label, new String(value), true, credIndex, i);
                         } catch (Exception e) {
-                            addDetailField(field.label, "[decrypt error]", false, row, i);
+                            addDetailField(field.label, "[decrypt error]", false, credIndex, i);
                         }
                     }
                 } else if (field.sensitive || field.password) {
@@ -672,17 +691,17 @@ public class Odin {
                         Yggdrasil.Credential fieldRefs = c;
                         byte[] data;
                         if (type.typeKey.equals("binary")) {data = fieldRefs.getDataField(3);} else {data = fieldRefs.getDataField(1);}
-                        addDetailSensitiveField(field.label, encBytes, c.iv, row, i, type.typeKey, false, data);
-                        } else {addDetailSensitiveField(field.label, encBytes, c.iv, row, i, type.typeKey, false, null);}
+                        addDetailSensitiveField(field.label, encBytes, c.iv, credIndex, i, type.typeKey, false, data);
+                        } else {addDetailSensitiveField(field.label, encBytes, c.iv, credIndex, i, type.typeKey, false, null);}
                 } else {
                     // ===== PLAIN FIELD - decrypt and show directly =====
                     try {
                         if (DEBUG) System.out.println("Decrypt for Show - Wipe Memory Space after");
                         char[] value = backend.decryptData(encBytes, c.iv);
-                        addDetailField(field.label, new String(value), field.multiline, row, i);
+                        addDetailField(field.label, new String(value), field.multiline, credIndex, i);
                         Yggdrasil.wipeCharArray(value);
                     } catch (Exception e) {
-                        addDetailField(field.label, "[decrypt error]", false, row, i);
+                        addDetailField(field.label, "[decrypt error]", false, credIndex, i);
                     }
                     detailContent.add(Box.createVerticalStrut(6));
                 }
@@ -1033,11 +1052,11 @@ public class Odin {
      * Sensitive fields always show as bullets in the table.
      */
     private void refreshTable() {
+        Futhark.EntryType type = Futhark.forKey(currentTypeFilter);
+        if (DEBUG) System.out.println("refreshTable()    Filter: " + currentTypeFilter);
+
         currentSearchQuery = ""; // Clear search when switching categories, one of my favorites
         updateSearchPlaceholder();
-
-        Futhark.EntryType type = Futhark.forKey(currentTypeFilter);
-        if (DEBUG) System.out.println("Filter: " + currentTypeFilter);
 
         // ===== REBUILD COLUMN HEADERS =====
         String[] headers = Futhark.tableHeaders(type);
@@ -1098,9 +1117,9 @@ public class Odin {
      * Called on double-click. Decrypts the clicked field, copies to clipboard,
      * starts auto-wipe timer, shows toast.
      */
-    private void copyFieldToClipboard(int row, int col) {
+    private void copyFieldToClipboard(int credIndex, int col) {
         try {
-            int credIndex = visibleRowToCredentialIndex(row);
+            //int credIndex = visibleRowToCredentialIndex(row);
             if (credIndex < 0) return;
 
             Yggdrasil.Credential c    = credentials.get(credIndex);
