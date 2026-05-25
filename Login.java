@@ -424,13 +424,14 @@ public class Login extends JFrame {
         }
 
         // ===== PASS CONN + VARS TO ODIN before building UI =====
-        odin.conn          = conn;
-        odin.DATABASE_TYPE = DATABASE_TYPE;
-        odin.username      = username;
-        odin.VaultLevel    = VaultLevel;
-        odin.dialogIcon    = dialogIcon;
-        odin.appIcon       = appIcon;
-        odin.DEBUG         = DEBUG;
+        odin.conn             = conn;
+        odin.DATABASE_TYPE    = DATABASE_TYPE;
+        odin.username         = username;
+        odin.VaultLevel       = VaultLevel;
+        odin.dialogIcon       = dialogIcon;
+        odin.appIcon          = appIcon;
+        odin.PASSWORD_LENGTH  = PASSWORD_LENGTH;
+        odin.DEBUG            = DEBUG;
             
         // ===== BUILD MAIN WINDOW on EDT - login stays visible until this completes =====
         SwingUtilities.invokeLater(() -> {
