@@ -22,7 +22,7 @@ import org.bouncycastle.crypto.params.KeyParameter;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 public class Yggdrasil {
-    public boolean DEBUG = false; // set to false before production
+    public static boolean DEBUG = false; // set to false before production
 
     // ===== CONFIG =====
     private static final int GCM_TAG_LENGTH = 128; // GCM authentication tag size in bits - maximum tag size is 128
@@ -152,7 +152,8 @@ public class Yggdrasil {
         if (Vault_Status.equals("new")){
             byte[] iv = generateIV();
             byte[] uuid = encryptData(GenUUID.generateAsString().toCharArray(), iv, Vault_Use_Key);
-        
+            set_DB_Creation_User(conn, username);
+
         try (PreparedStatement insert = conn.prepareStatement(
                 "INSERT INTO server(uuid, iv) " +
                 "VALUES(?, ?)")) {
@@ -161,6 +162,7 @@ public class Yggdrasil {
                 insert.executeUpdate();
             }
         }
+        set_DB_LastLogin_User(conn, username);
     }
 
     // ===== CHANGE MASTER PASSWORD =====
@@ -359,14 +361,13 @@ public class Yggdrasil {
     // ===== ENCRYPT =====
     // AES-256-GCM: AES is the lock 🔒, GCM is the tamper seal 🧾
     // IV is random per-entry — same input never produces same ciphertext
-    private byte[] encryptData(char[] plaintext, byte[] iv, byte[] key) throws Exception {
-        // Convert char[] to bytes — wipe after use
+    private static byte[] encryptData(char[] plaintext, byte[] iv, byte[] key) throws Exception {
         byte[] data = new String(plaintext).getBytes(StandardCharsets.UTF_8);
         return encryptData(data, iv, key);
     }
 
     // Overload — accepts byte[] directly for re-encryption during vault password change
-    private byte[] encryptData(byte[] data, byte[] iv, byte[] key) throws Exception {
+    private static byte[] encryptData(byte[] data, byte[] iv, byte[] key) throws Exception {
         KeyParameter keyParam = new KeyParameter(key);
         GCMModeCipher cipher  = GCMBlockCipher.newInstance(AESEngine.newInstance());
         AEADParameters params = new AEADParameters(keyParam, GCM_TAG_LENGTH, iv);
@@ -384,6 +385,10 @@ public class Yggdrasil {
     // ===== DECRYPT (ON DEMAND ONLY) =====
     // Returns plaintext as char[] — caller must wipe after use
     // Three-arg version: explicit key passed in (for re-encryption, loading)
+    protected char[] decryptData(byte[] encrypted_data, byte[] iv) throws Exception {
+        return decryptData(encrypted_data, iv, Vault_Use_Key);
+    }
+
     protected char[] decryptData(byte[] encrypted_data, byte[] iv, byte[] key) throws Exception {
         KeyParameter keyParam = new KeyParameter(key);
         GCMModeCipher cipher  = GCMBlockCipher.newInstance(AESEngine.newInstance());
@@ -398,11 +403,6 @@ public class Yggdrasil {
         wipeByteArray(decrypted);
         Arrays.fill(keyParam.getKey(), (byte) 0);
         return plaintext;
-    }
-
-    // Two-arg version: uses the current session's Vault_Use_Key implicitly
-    protected char[] decryptData(byte[] encrypted_data, byte[] iv) throws Exception {
-        return decryptData(encrypted_data, iv, Vault_Use_Key);
     }
 
     // ===== LOAD ALL CREDENTIALS FROM DB =====
@@ -488,8 +488,6 @@ public class Yggdrasil {
         for (byte[] d : enc_data) wipeByteArray(d);
         wipeByteArray(iv);
     }
-
-
     
     protected void updateEntry(Connection conn, int id, char[] tag, char[][] dataFields, String folderId, char[] type, String creationDate) throws Exception {
         byte[] iv = generateIV();
@@ -519,7 +517,7 @@ public class Yggdrasil {
             update.setBytes(13, enc_rD);
             update.setBytes(14, enc_fI);
             update.setBytes(15, iv);
-            update.setInt(16,   id);            // WHERE id = ?  (always last)
+            update.setInt(16,   id);
             update.executeUpdate();
         }
         if (DEBUG) System.out.println("Data Saved.");
@@ -540,6 +538,42 @@ public class Yggdrasil {
         return cipher.wrap(new SecretKeySpec(Vault_KEY, "AES"));
     }
 
+// ##################################### USERS #######################################################################################
+// ##################################### BLOB ########################################################################################
+    protected void set_DB_LastLogin_User(Connection conn, String username) throws Exception {
+        byte[] iv = Mimir.Pull_DB_IV_User_item(conn, username);
+        byte[] enc_last_login = encryptData(timeCheck_UTC_time().toCharArray(), iv, Vault_Use_Key);
+        
+
+        String sql = "UPDATE users SET last_login=? WHERE user_id=?";
+
+        try (PreparedStatement update = conn.prepareStatement(sql)) {
+            update.setBytes(1,  enc_last_login);
+            update.setString(2,   username);
+            update.executeUpdate();
+        }
+        if (DEBUG) System.out.println("Login updated.");
+        wipeByteArray(iv);
+    }
+
+    protected static void set_DB_Creation_User(Connection conn, String username) throws Exception {
+        byte[] iv = generateIV();
+        byte[] enc_created_at = encryptData(timeCheck_UTC_time().toCharArray(), iv, Vault_Use_Key);
+        
+
+        String sql = "UPDATE users SET created_at=?, iv=? WHERE user_id=?";
+
+        try (PreparedStatement update = conn.prepareStatement(sql)) {
+            update.setBytes(1,  enc_created_at);
+            update.setBytes(2,  iv);
+            update.setString(3,   username);
+            update.executeUpdate();
+        }
+        if (DEBUG) System.out.println("Login updated.");
+        wipeByteArray(iv);
+        wipeByteArray(enc_created_at);
+    }
+
     // ===== ADD USER =====
     // Creates a new user row with their own salt, derived key, and wrapped vault key
     protected void useraddEntry(Connection conn, String newUsername, char[] newPassword)
@@ -558,7 +592,7 @@ public class Yggdrasil {
             "INSERT INTO users(user_id, role, wrapped_vk, salt, argon2_iter, argon2_mem, argon2_para) " +
             "VALUES(?, ?, ?, ?, ?, ?, ?)")) {
             insert.setString(1, newUsername);
-            insert.setString(2, "member");  // fixed typo from original "memeber"
+            insert.setString(2, "member");
             insert.setBytes(3,  newWrappedKey);
             insert.setBytes(4,  new_salt);
             insert.setInt(5,    profile.iterations());
@@ -567,7 +601,7 @@ public class Yggdrasil {
             insert.executeUpdate();
             if (DEBUG) System.out.println("Data Saved.");
         }
-
+        set_DB_Creation_User(conn, newUsername);
         wipeByteArray(new_User_AES_Key);
         wipeByteArray(newWrappedKey);
         wipeCharArray(newPassword);
@@ -575,7 +609,7 @@ public class Yggdrasil {
 
     // ===== IV GENERATION =====
     // Initialization Vector — random per entry so identical inputs produce different ciphertext
-    private byte[] generateIV() {
+    private static byte[] generateIV() {
         byte[] iv = new byte[IV_LENGTH];
         new SecureRandom().nextBytes(iv);
         return iv;

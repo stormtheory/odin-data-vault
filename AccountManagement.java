@@ -497,20 +497,24 @@ public class AccountManagement {
         // ===== CLEAR EXISTING ROWS before re-populating =====
         model.setRowCount(0);
 
-        String sql = "SELECT user_id, role, argon2_iter, argon2_mem, argon2_para, last_login " +
+        String sql = "SELECT user_id, role, argon2_iter, argon2_mem, argon2_para, last_login, iv " +
                      "FROM users ORDER BY role DESC, user_id ASC";
 
         try (PreparedStatement ps = conn.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
-
+    
             while (rs.next()) {
                 String userId        = rs.getString("user_id");
                 String role          = rs.getString("role");
                 int    iter          = rs.getInt("argon2_iter");
                 int    mem           = rs.getInt("argon2_mem");
                 int    para          = rs.getInt("argon2_para");
-                byte[] lastLoginBlob = rs.getBytes("last_login");
-
+                byte[] iv            = rs.getBytes("iv");
+                String lastLoginBlob = null;
+                try{
+                    lastLoginBlob = new String(backend.decryptData(rs.getBytes("last_login"), iv));
+                    if (DEBUG) System.out.println(lastLoginBlob);
+                } catch (Exception e){System.out.println(e);}
                 // ===== DERIVE DISPLAY VALUES from raw column data =====
                 String lastLoginStr = formatLastLogin(lastLoginBlob);
                 String statusStr    = deriveStatus(lastLoginBlob);
@@ -531,15 +535,15 @@ public class AccountManagement {
      * @param blob raw bytes from the last_login column, or null if never logged in
      * @return formatted date string, or "Never" if null/blank
      */
-    private String formatLastLogin(byte[] blob) {
-        if (blob == null || blob.length == 0) return "Never";
+    private String formatLastLogin(String blob) {
+        if (blob == null || blob.length() == 0) return "Never";
         try {
-            String raw = new String(blob, StandardCharsets.UTF_8).trim();
+            String raw = blob.trim();
             Instant instant = Instant.parse(raw);
             return LAST_LOGIN_FMT.format(instant);
         } catch (Exception ex) {
             // ===== FALLBACK: return raw string if ISO-8601 parsing fails =====
-            return new String(blob, StandardCharsets.UTF_8);
+            return blob;
         }
     }
 
@@ -550,10 +554,10 @@ public class AccountManagement {
      * @param blob raw bytes from the last_login column
      * @return status label string
      */
-    private String deriveStatus(byte[] blob) {
-        if (blob == null || blob.length == 0) return "Never";
+    private String deriveStatus(String blob) {
+        if (blob == null || blob.length() == 0) return "Never";
         try {
-            String  raw      = new String(blob, StandardCharsets.UTF_8).trim();
+            String  raw      = blob.trim();
             Instant instant  = Instant.parse(raw);
             long    hoursAgo = (System.currentTimeMillis() - instant.toEpochMilli()) / 3_600_000L;
             if (hoursAgo < 1)  return "Active";
