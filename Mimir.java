@@ -181,15 +181,29 @@ public class Mimir
         }
     }
 
+// ##################################### USERS #######################################################################################
+// ##################################### BLOB ########################################################################################
 
-    // ===== DELETE ENTRY ===== ----- Yup
-    protected void deleteEntry(Connection conn, int id) throws Exception {
-        String sql = "DELETE FROM vault WHERE id = ?";
+    protected static byte[] Pull_DB_IV_User_item(Connection conn, String username) throws Exception {
+        String sql = "SELECT iv FROM users WHERE user_id = ?";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setInt(1, id);
-            int rows = stmt.executeUpdate();
-            if (rows == 0) {
-                throw new IllegalStateException("Delete affected 0 rows - vault id not found: " + id);
+            stmt.setString(1, username);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (!rs.next()) {
+                    throw new IllegalStateException("Username not found: " + username);
+                }
+                return rs.getBytes(1);
+            }
+        } catch (Exception e){Yggdrasil.set_DB_Creation_User(conn, username);}
+        
+        // Try again
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, username);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (!rs.next()) {
+                    throw new IllegalStateException("Username not found: " + username);
+                }
+                return rs.getBytes(1);
             }
         }
     }
@@ -202,6 +216,21 @@ public class Mimir
             int rows = stmt.executeUpdate();
             if (rows == 0) {
                 throw new IllegalStateException("Delete affected 0 rows - user_id not found: " + user_id);
+            }
+        }
+    }
+
+// ##################################### VAULT #######################################################################################
+// ##################################### ENTRIES #####################################################################################
+
+    // ===== DELETE ENTRY ===== ----- Yup
+    protected void deleteEntry(Connection conn, int id) throws Exception {
+        String sql = "DELETE FROM vault WHERE id = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, id);
+            int rows = stmt.executeUpdate();
+            if (rows == 0) {
+                throw new IllegalStateException("Delete affected 0 rows - vault id not found: " + id);
             }
         }
     }

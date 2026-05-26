@@ -17,7 +17,6 @@ public class Odin {
 // ===== CONFIG =====
     
     public  static final String DATABASE_VER       = "0";
-    private static int          PASSWORD_LENGTH      = 14;
     public  static long         IDLE_TIMEOUT_MINUTES = 10;
     private static final int    CLIPBOARD_CLEAR_MS = 30_000; // 30 seconds
     private static final int    BUFFER_SIZE = 8 * 1024;
@@ -38,6 +37,7 @@ public class Odin {
     public ImageIcon                     appIcon      = null;
     public List<Yggdrasil.Credential>    credentials  = new ArrayList<>();
     public Yggdrasil                     backend      = new Yggdrasil();
+    public int                           PASSWORD_LENGTH;
     public static boolean                DEBUG;
 
 // import
@@ -49,9 +49,11 @@ public class Odin {
 // ===== STATIC SHARED FIELDS =====
     protected static Mimir               databaseutilities = new Mimir();
     protected static int                 addupdate_id;
+    protected static String creationDate; // PlaceHolders // gets filled on the other side if blank
+    protected static String revisionDate; // PlaceHolders // gets filled on the other side if blank
 
 // ===== MASTER PASSWORD - written by createNewMasterPass(), read by Login =====
-    public char[]  masterPassword = new char[0];
+    protected char[]  masterPassword = new char[0];
 
 // ===== MAIN TABLE =====
     private JTable             table;
@@ -547,22 +549,37 @@ public class Odin {
         JButton addBtn              = new JButton("＋ Add Secret");
         JButton delBtn              = new JButton("🗑 Delete Selected");
         JButton updateBtn           = new JButton("Update");
-        JButton changeMasterPassBtn = new JButton("🔐 Account: " + username);
+        JButton accountBtn = new JButton("🔐 Account: " + username);
 
         ThemeManager.styleAccentButton(addBtn);
         ThemeManager.styleAccentButton(updateBtn);
         ThemeManager.styleDangerButton(delBtn);
-        ThemeManager.styleSurfaceButton(changeMasterPassBtn);
+        ThemeManager.styleSurfaceButton(accountBtn);
 
         addBtn.addActionListener(e              -> addUpdateEntry("add"));
         updateBtn.addActionListener(e           -> addUpdateEntry("update"));
         delBtn.addActionListener(e              -> deleteEntry());
-        changeMasterPassBtn.addActionListener(e -> changeMasterPass(username));
+        //changeMasterPassBtn.addActionListener(e -> changeMasterPass(username));
+
+        accountBtn.addActionListener(e -> {
+            AccountManagement aM = new AccountManagement(backend, conn, DATABASE_TYPE, username, VaultLevel, DATABASE_TYPE, PASSWORD_LENGTH, DEBUG);
+            aM.showManagerPane(mainFrame, credentials, () -> {
+                // ===== Called after successful import - reload and refresh =====
+                try {
+                    credentials.clear();
+                    credentials.addAll(backend.loadAll(conn));
+                    refreshTable();
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                    ToastManager.error(mainFrame, "Failed to reload after import.");
+                }
+            });
+        });
 
         panel.add(addBtn);
         panel.add(updateBtn);
         panel.add(delBtn);
-        panel.add(changeMasterPassBtn);
+        panel.add(accountBtn);
 
         // ===== IMPORT / EXPORT BUTTON =====
         JButton importExportBtn = new JButton("⇅ Import / Export(Backup)");
@@ -582,18 +599,6 @@ public class Odin {
             });
         });
         panel.add(importExportBtn);
-
-        // ===== MULTI-USER CONTROLS - only visible for multi-user vault =====
-        if (DATABASE_TYPE.equals("m")) {
-            JButton useraddBtn = new JButton("👤＋ Add User");
-            JButton userdelBtn = new JButton("👤✕ Del User");
-            ThemeManager.styleSurfaceButton(useraddBtn);
-            ThemeManager.styleDangerButton(userdelBtn);
-            useraddBtn.addActionListener(e -> useraddEntry(username));
-            userdelBtn.addActionListener(e -> userdelEntry(username));
-            panel.add(useraddBtn);
-            panel.add(userdelBtn);
-        }
 
         return panel;
     }
@@ -703,10 +708,12 @@ public class Odin {
                     } catch (Exception e) {
                         addDetailField(field.label, "[decrypt error]", false, credIndex, i);
                     }
-                    detailContent.add(Box.createVerticalStrut(6));
                 }
             }
         }
+        //detailContent.add(Box.createVerticalStrut(6));
+        addDetailField("Revision", c.revisionDate, false, credIndex, -1);
+        addDetailField("Creation", c.creationDate, false, credIndex, -1);
         detailContent.revalidate();
         detailContent.repaint();
     }
@@ -843,8 +850,7 @@ public class Odin {
                 // ===== Open viewer dialog =====
                 final byte[] decodedFinal = decoded;
                 final String filenameFinal = filename;
-                SwingUtilities.invokeLater(() ->
-                    BinaryViewer.showViewerDialog(mainFrame, decodedFinal, fileType, filenameFinal));
+                SwingUtilities.invokeLater(() -> BinaryViewer.showViewerDialog(mainFrame, decodedFinal, fileType, filenameFinal));
 
             } catch (Exception ex) {
                 ex.printStackTrace();
@@ -1391,7 +1397,7 @@ public class Odin {
                 if (credIndex >= 0) {
                     Yggdrasil.Credential c        = credentials.get(credIndex);
                     Futhark.EntryType    type     = Futhark.forKey(c.type);
-                    String creationDate = c.creationDate;
+                    creationDate = c.creationDate;
 
                     // ===== TAG - always present =====
                     tagField.setText(new String(c.tag));
@@ -1501,14 +1507,13 @@ public class Odin {
                         dataFields[i] = ta.getText().toCharArray();
                     }
                 }
-
-                String creationDate=" "; // PlaceHolders // gets filled on the other side if blank
-                String revisionDate=" "; // PlaceHolders // gets filled on the other side if blank
+                
                 String folderId=" "; // PlaceHolders
                 if (mode.equals("update")) {
+                    if (creationDate == null || creationDate.isBlank()) creationDate = " ";
                     backend.updateEntry(conn, addupdate_id, tagField.getText().toCharArray(), dataFields, folderId, selectedType.typeKey.toCharArray(), creationDate);
                 } else {
-                    backend.addEntry(conn, tagField.getText().toCharArray(), selectedType.typeKey.toCharArray(), dataFields, DATABASE_TYPE, creationDate, revisionDate, folderId);
+                    backend.addEntry(conn, tagField.getText().toCharArray(), selectedType.typeKey.toCharArray(), dataFields, DATABASE_TYPE, folderId, null, null);
                 }
 
                 for (char[] d : dataFields) if (d != null) Yggdrasil.wipeCharArray(d);
@@ -1754,23 +1759,6 @@ public class Odin {
         }
     }
 
-    // ===== CHANGE MASTER PASSWORD =====
-    private void changeMasterPass(String username) {
-        char[][] creds = createNewMasterPass(conn, false,false,"From_SQL",PASSWORD_LENGTH);
-            try {
-                masterPassword = creds[1];
-                username = new String(creds[2]);
-                VaultLevel = new String(creds[3]);
-                DATABASE_TYPE = new String(creds[4]);
-                backend.changeMasterPass(conn, masterPassword, username);
-                ToastManager.success(mainFrame, "Password changed for " + username);
-            } catch (Exception e) {
-                e.printStackTrace();
-                ToastManager.error(mainFrame, "Failed to change account password.");
-            }
-            Yggdrasil.wipeCharArray(masterPassword);
-        }
-
     // ===== PASSWORD STRENGTH CHECK =====
     public boolean testPasswordStrength(char[] password, char[] p2) {
         if (!java.util.Arrays.equals(password, p2)) {
@@ -1954,48 +1942,5 @@ public class Odin {
             Yggdrasil.wipeCharArray(p2);
             if (good) return creds;
         }
-    }
-
-    // ===== ADD USER =====
-    private void useraddEntry(String current_username) {
-        JTextField     userField  = new JTextField();
-        JPasswordField passField1 = new JPasswordField();
-        JPasswordField passField2 = new JPasswordField();
-
-        int option = JOptionPane.showConfirmDialog(mainFrame,
-            new Object[]{"New Username:", userField, "Create Password:", passField1,
-                         "Confirm Password:", passField2},
-            "Add User", JOptionPane.OK_CANCEL_OPTION);
-
-        if (option == JOptionPane.OK_OPTION) {
-            boolean good = testPasswordStrength(passField1.getPassword(), passField2.getPassword());
-            if (good && !userField.getText().equals(current_username)) {
-                try {
-                    backend.useraddEntry(conn, userField.getText(), passField1.getPassword());
-                    ToastManager.success(mainFrame, userField.getText() + " added.");
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    ToastManager.error(mainFrame, "Failed to add user: " + userField.getText());
-                } 
-            } else {ToastManager.error(mainFrame, "Failed to add user: " + userField.getText());}
-        }
-    }
-
-    // ===== DELETE USER =====
-    private void userdelEntry(String current_username) {
-        JTextField userField = new JTextField();
-
-        int option = JOptionPane.showConfirmDialog(mainFrame,
-            new Object[]{"Username:", userField}, "Delete User", JOptionPane.OK_CANCEL_OPTION);
-
-        if (option == JOptionPane.OK_OPTION && !userField.getText().equals(current_username)) {
-            try {
-                databaseutilities.userdelEntry(conn, userField.getText());
-                ToastManager.success(mainFrame, userField.getText() + " deleted.");
-            } catch (Exception e) {
-                e.printStackTrace();
-                ToastManager.error(mainFrame, "Failed to delete user: " + userField.getText());
-            }
-        } else {ToastManager.error(mainFrame, "Failed to add user: " + userField.getText());}
     }
 }

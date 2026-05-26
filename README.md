@@ -91,6 +91,8 @@ Upon class project completion, the project was compared to Bitwarden, after read
   * `vault`: stores encrypted (tag, username, password, data), and IV
   * `users`: stores username, role, wrapped_vk(multi-user), user_salt, argon2_parameters
   * `meta`: stores vault_salt, database_version, database_type, and future metadata
+  * `server`
+  * `folders`
 
 Tags, Usernames, and Passwords are stored as encrypted binary blobs.
 

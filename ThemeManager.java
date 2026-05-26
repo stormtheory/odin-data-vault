@@ -26,40 +26,40 @@ import javax.swing.plaf.ColorUIResource;
 public class ThemeManager {
 
     // ===== PALETTE - DARK =====
-    // Cold void, iron stone, northern lights — Yggdrasil at midnight
-    public static final Color DARK_BG          = new Color(0x0A0E17); // void before creation — main window bg
-    public static final Color DARK_SURFACE     = new Color(0x111827); // cold stone hall — sidebar, panels
-    public static final Color DARK_SURFACE2    = new Color(0x1A2235); // aged timber — inputs, table rows
-    public static final Color DARK_BORDER      = new Color(0x2A3347); // iron veins in stone — dividers
-    public static final Color DARK_TEXT        = new Color(0xE8EEF4); // frost breath — primary text
-    public static final Color DARK_TEXT_MUTED  = new Color(0x7A8899); // fog over the fjord — secondary text
-    public static final Color DARK_ACCENT      = new Color(0x5ECFB0); // aurora teal — the light Odin follows
+    // Cold void, iron stone, northern lights - Yggdrasil at midnight
+    public static final Color DARK_BG          = new Color(0x0A0E17); // void before creation - main window bg
+    public static final Color DARK_SURFACE     = new Color(0x111827); // cold stone hall - sidebar, panels
+    public static final Color DARK_SURFACE2    = new Color(0x1A2235); // aged timber - inputs, table rows
+    public static final Color DARK_BORDER      = new Color(0x2A3347); // iron veins in stone - dividers
+    public static final Color DARK_TEXT        = new Color(0xE8EEF4); // frost breath - primary text
+    public static final Color DARK_TEXT_MUTED  = new Color(0x7A8899); // fog over the fjord - secondary text
+    public static final Color DARK_ACCENT      = new Color(0x5ECFB0); // aurora teal - the light Odin follows
     public static final Color DARK_ACCENT_HOV  = new Color(0x3DB896); // deeper aurora on hover
-    public static final Color DARK_ACCENT_BTN     = new Color(0x2E9478); // aurora teal — muted, seen from distance
+    public static final Color DARK_ACCENT_BTN     = new Color(0x2E9478); // aurora teal - muted, seen from distance
     public static final Color DARK_ACCENT_BTN_HOV = new Color(0x1F7D63); // deeper aurora on hover
-    public static final Color DARK_DANGER      = new Color(0xC94F3A); // forge fire — Ragnarok red
-    public static final Color DARK_SUCCESS     = new Color(0x3A9E6A); // Yggdrasil leaf — living green
-    public static final Color DARK_WARNING     = new Color(0xC4882A); // torchlight amber — mead hall glow
-    public static final Color DARK_SELECT      = new Color(0x1F3A5F); // deep fjord water — row selection
+    public static final Color DARK_DANGER      = new Color(0xC94F3A); // forge fire - Ragnarok red
+    public static final Color DARK_SUCCESS     = new Color(0x3A9E6A); // Yggdrasil leaf - living green
+    public static final Color DARK_WARNING     = new Color(0xC4882A); // torchlight amber - mead hall glow
+    public static final Color DARK_SELECT      = new Color(0x1F3A5F); // deep fjord water - row selection
     public static final Color DARK_LEFT_LOGIN  = new Color(0x1E5F8E); // deep cold water
 
     // ===== PALETTE - LIGHT =====
-    // Aged stone, weathered birch, overcast Nordic sky — Asgard at dawn
-    public static final Color LIGHT_BG         = new Color(0xDDE4EC); // slate grey-blue — overcast Nordic sky
-    public static final Color LIGHT_SURFACE    = new Color(0xE8EEF4); // birch bark — panels, sidebar
-    public static final Color LIGHT_SURFACE2   = new Color(0xD4DCE6); // wet stone — inputs, table rows
-    public static final Color LIGHT_BORDER     = new Color(0xB0BDCC); // iron slate — dividers
-    public static final Color LIGHT_TEXT       = new Color(0x1A2130); // raven black — deep night ink
-    public static final Color LIGHT_TEXT_MUTED = new Color(0x5A6878); // storm grey — secondary text
-    public static final Color LIGHT_ACCENT     = new Color(0x1B6CA8); // fjord deep blue — Odin's cloak
-    public static final Color LIGHT_ACCENT_HOV = new Color(0x14538A); // midnight water — hover state
-    public static final Color LIGHT_ACCENT_BTN     = new Color(0x1B6CA8); // fjord deep blue — Odin's cloak
-    public static final Color LIGHT_ACCENT_BTN_HOV = new Color(0x14538A); // midnight water — hover state
+    // Aged stone, weathered birch, overcast Nordic sky - Asgard at dawn
+    public static final Color LIGHT_BG         = new Color(0xDDE4EC); // slate grey-blue - overcast Nordic sky
+    public static final Color LIGHT_SURFACE    = new Color(0xE8EEF4); // birch bark - panels, sidebar
+    public static final Color LIGHT_SURFACE2   = new Color(0xD4DCE6); // wet stone - inputs, table rows
+    public static final Color LIGHT_BORDER     = new Color(0xB0BDCC); // iron slate - dividers
+    public static final Color LIGHT_TEXT       = new Color(0x1A2130); // raven black - deep night ink
+    public static final Color LIGHT_TEXT_MUTED = new Color(0x5A6878); // storm grey - secondary text
+    public static final Color LIGHT_ACCENT     = new Color(0x1B6CA8); // fjord deep blue - Odin's cloak
+    public static final Color LIGHT_ACCENT_HOV = new Color(0x14538A); // midnight water - hover state
+    public static final Color LIGHT_ACCENT_BTN     = new Color(0x1B6CA8); // fjord deep blue - Odin's cloak
+    public static final Color LIGHT_ACCENT_BTN_HOV = new Color(0x14538A); // midnight water - hover state
     public static final Color LIGHT_DANGER     = new Color(0xB33A2A); // blood on the battlefield
     public static final Color LIGHT_SUCCESS    = new Color(0x246E45); // forest of Yggdrasil
-    public static final Color LIGHT_WARNING    = new Color(0x9A6200); // burnished gold — Odin's ravens
-    public static final Color LIGHT_SELECT     = new Color(0xD6E8F5); // glacial melt — row selection
-    public static final Color LIGHT_LEFT_LOGIN = new Color(0xE8EEF4); // glacial blue — iceberg cold
+    public static final Color LIGHT_WARNING    = new Color(0x9A6200); // burnished gold - Odin's ravens
+    public static final Color LIGHT_SELECT     = new Color(0xD6E8F5); // glacial melt - row selection
+    public static final Color LIGHT_LEFT_LOGIN = new Color(0xE8EEF4); // glacial blue - iceberg cold
 //0x2A6B9C
     // ===== ACTIVE PALETTE (set after detection) =====
     public static Color BG, SURFACE, SURFACE2, BORDER, TEXT, TEXT_MUTED,

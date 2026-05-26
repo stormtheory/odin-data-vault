@@ -866,7 +866,7 @@ public class ImportExport {
                 String   creationDate   = (String)  parsed[3];
                 String   revisionDate   = (String)  parsed[4];
                 String   folderId         = (String)  parsed[5];
-                backend.addEntry(conn, tag, odinType.toCharArray(), dataFields, dbType, creationDate, revisionDate, folderId);
+                backend.addEntry(conn, tag, odinType.toCharArray(), dataFields, dbType, folderId, creationDate, revisionDate);
                 for (char[] d : dataFields) if (d != null) Yggdrasil.wipeCharArray(d);
                 Yggdrasil.wipeCharArray(tag);
                 count++;
@@ -979,7 +979,7 @@ public class ImportExport {
                 String   creationDate   = (String)  parsed[3];
                 String   revisionDate   = (String)  parsed[4];
                 String   folderId         = (String)  parsed[5];
-                backend.addEntry(conn, tag, odinType.toCharArray(), dataFields, dbType, creationDate, revisionDate, folderId);
+                backend.addEntry(conn, tag, odinType.toCharArray(), dataFields, dbType, folderId, creationDate, revisionDate);
                 for (char[] d : dataFields) if (d != null) Yggdrasil.wipeCharArray(d);
                 Yggdrasil.wipeCharArray(tag);
                 count++;
@@ -1028,7 +1028,7 @@ public class ImportExport {
                 String   creationDate   = (String)  parsed[3];
                 String   revisionDate   = (String)  parsed[4];
                 String   folderId         = (String)  parsed[5];
-                backend.addEntry(conn, tag, odinType.toCharArray(), dataFields, dbType, creationDate, revisionDate, folderId);
+                backend.addEntry(conn, tag, odinType.toCharArray(), dataFields, dbType, folderId, creationDate, revisionDate);
                 for (char[] d : dataFields) if (d != null) Yggdrasil.wipeCharArray(d);
                 Yggdrasil.wipeCharArray(tag);
                 count++;

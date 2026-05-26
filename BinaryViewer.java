@@ -39,25 +39,28 @@ import java.util.List;
 //   BinaryViewer.exportFile(parent, decoded, filename);
 // ============================================================================
 public final class BinaryViewer {
+    protected static boolean readyToWipe = false; 
 
     // ===== Active RamDisk instances - tracked for shutdown hook wipe =====
     private static final List<RamDisk> activeRamDisks = Collections.synchronizedList(new ArrayList<>());
 
     // ===== Shutdown hook registered once at class load =====
     // Belt-and-suspenders: wipes all RAM disks if JVM exits unexpectedly
-    static {
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            synchronized (activeRamDisks) {
-                for (RamDisk rd : activeRamDisks) {
-                    try { rd.wipeAndDestroy(); }
-                    catch (Exception e) {
-                        System.err.println("[BinaryViewer] Shutdown wipe failed: " + e.getMessage());
-                    }
-                }
-                activeRamDisks.clear();
-            }
-        }, "binary-viewer-shutdown-wipe"));
-    }
+    // static {
+    //     Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+    //         if (readyToWipe){
+    //         synchronized (activeRamDisks) {
+    //             for (RamDisk rd : activeRamDisks) {
+    //                 try { rd.wipeAndDestroy(); }
+    //                 catch (Exception e) {
+    //                     System.err.println("[BinaryViewer] Shutdown wipe failed: " + e.getMessage());
+    //                 }
+    //             }
+    //             activeRamDisks.clear();
+    //         System.out.println("[BinaryViewer] wipeAll done.");
+    //     }}
+    //     }, "binary-viewer-shutdown-wipe"));
+    // }
 
     // ===== Magic byte signatures for file type detection =====
     // Always check magic bytes first; filename extension is fallback only
@@ -107,6 +110,7 @@ public final class BinaryViewer {
      * @return detected type, never null
      */
     public static DetectedType detect(byte[] firstBytes, String filename) {
+        readyToWipe = true;
         if (firstBytes != null && firstBytes.length >= 4) {
 
             // ===== Magic byte checks in order of specificity =====
@@ -208,6 +212,7 @@ public final class BinaryViewer {
      * @param filename original filename for dialog title and export default name
      */
     public static void showViewerDialog(JFrame parent, byte[] decoded,DetectedType type, String filename) {
+        readyToWipe = true;
         JDialog dialog = new JDialog(parent, filename, true);
         dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
         dialog.setSize(760, 820);
@@ -322,6 +327,7 @@ public final class BinaryViewer {
      * Called by idle timeout manager and on vault lock.
      */
     public static void wipeAll() {
+        if (readyToWipe){
         synchronized (activeRamDisks) {
             for (RamDisk rd : activeRamDisks) {
                 try { rd.wipeAndDestroy(); }
@@ -331,7 +337,8 @@ public final class BinaryViewer {
             }
             activeRamDisks.clear();
         }
-    }
+        System.out.println("[BinaryViewer] wipeAll done.");
+    }}
 
     // =========================================================================
     // Private: content area builder
