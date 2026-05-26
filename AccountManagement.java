@@ -29,6 +29,10 @@ import java.time.format.DateTimeFormatter;
  * color-coded against OWASP 2023 recommended minimums. A horizontal bottom
  * toolbar exposes all user management actions.
  *
+ * Button visibility and enabled state is controlled exclusively by
+ * applyToolbarState(), called once on open and again on every row
+ * selection change. No other code touches button visibility.
+ *
  * Toolbar actions that are not yet wired to backend calls are stubbed
  * with detailed intent comments describing what each would do.
  */
@@ -61,8 +65,8 @@ public class AccountManagement {
     private static JFrame    parent;
     private static char[]    masterPassword;
 
-    // ===== TABLE MODEL: columns match the users table SELECT =====
-    // Columns: Username, Role, Iterations, Memory, Lanes, Last Login, Status
+    // ===== TABLE COLUMN DEFINITIONS: mirrors the users SELECT =====
+    // Order: Username, Role, argon2_iter, argon2_mem, argon2_para, last_login, status
     private static final String[] TABLE_COLUMNS = {
         "User", "Role", "Iterations", "Memory (KB)", "Lanes", "Last Login", "Status"
     };
@@ -88,7 +92,7 @@ public class AccountManagement {
 
     /**
      * Shows the user management dialog with a live user table and horizontal toolbar.
-     * Called from the Odin toolbar; parent frame is needed for modal anchoring.
+     * Called from the Odin toolbar; parent frame needed for modal anchoring.
      *
      * @param MainFrame         the parent JFrame to anchor the modal dialog to
      * @param credentials       current credential list (passed through for context)
@@ -99,6 +103,7 @@ public class AccountManagement {
                                 Runnable onImportComplete) {
 
         parent = MainFrame;
+        final boolean currentUserIsAdmin = "admin".equals(lookupCurrentUserRole());
 
         // ===== OUTER DIALOG =====
         JDialog dialog = new JDialog(parent, "Account: " + username, true);
@@ -176,69 +181,59 @@ public class AccountManagement {
             BorderFactory.createMatteBorder(1, 0, 0, 0, ThemeManager.BORDER),
             BorderFactory.createEmptyBorder(8, 12, 8, 12)));
 
-        // ===== ADD USER BUTTON =====
-        // Visible only in multi-user vault mode (DATABASE_TYPE == "m")
-        JButton btnAdd = new JButton("+ Add User");
-        ThemeManager.styleSurfaceButton(btnAdd);
-
-        // ===== DELETE USER BUTTON =====
-        JButton btnDel = new JButton("Del User");
-        ThemeManager.styleDangerButton(btnDel);
-        btnDel.setEnabled(false); // ===== ENABLED only when a non-self row is selected =====
-
-        // ===== CHANGE PASSWORD BUTTON =====
-        JButton btnPass = new JButton("Change Password");
-        ThemeManager.styleSurfaceButton(btnPass);
-
-        // ===== FORCE RE-AUTH BUTTON =====
-        // Disabled until a non-self row is selected in the table
-        JButton btnReauth = new JButton("Force Re-auth");
-        ThemeManager.styleSurfaceButton(btnReauth);
-        btnReauth.setEnabled(false);
-
-        // ===== UPGRADE ARGON2 BUTTON =====
-        // Disabled until a row is selected; only actionable if user key is live in memory
+        // ===== BUTTON DECLARATIONS =====
+        // All initial visibility/enabled state is set by applyToolbarState() below.
+        // Do NOT set setVisible() or setEnabled() anywhere else in this method.
+        JButton btnAdd     = new JButton("+ Add User");
+        JButton btnDel     = new JButton("Del User");
+        JButton btnPass    = new JButton("Change Password");
+        JButton btnReauth  = new JButton("Force Re-auth");
         JButton btnUpgrade = new JButton("Upgrade Params");
-        ThemeManager.styleSurfaceButton(btnUpgrade);
-        btnUpgrade.setEnabled(false);
-
-        // ===== REFRESH BUTTON: pushed to the right side of the toolbar =====
         JButton btnRefresh = new JButton("Refresh");
+
+        ThemeManager.styleSurfaceButton(btnAdd);
+        ThemeManager.styleDangerButton(btnDel);
+        ThemeManager.styleSurfaceButton(btnPass);
+        ThemeManager.styleSurfaceButton(btnReauth);
+        ThemeManager.styleSurfaceButton(btnUpgrade);
         ThemeManager.styleSurfaceButton(btnRefresh);
 
-        // ===== ENABLE/DISABLE CONTEXT BUTTONS on row selection =====
-        // Delete and Force Re-auth are disabled when the logged-in admin is selected,
-        // so an admin cannot remove themselves or lock themselves out.
+        // ===== INITIAL TOOLBAR STATE: no row selected =====
+        // applyToolbarState is the single source of truth for all button
+        // visibility and enabled state. Called here on open, and again
+        // inside the selection listener on every row change.
+        applyToolbarState(btnAdd, btnDel, btnPass, btnReauth, btnUpgrade, btnRefresh,
+                          false, false, false);
+
+        // ===== ROW SELECTION LISTENER: re-evaluate toolbar state on every change =====
         userTable.getSelectionModel().addListSelectionListener(e -> {
             if (e.getValueIsAdjusting()) return;
             int row = userTable.getSelectedRow();
+
+            // ===== NO ROW SELECTED: reset to no-selection defaults =====
             if (row < 0) {
-                btnDel.setEnabled(false);
-                btnReauth.setEnabled(false);
-                btnUpgrade.setEnabled(false);
+                applyToolbarState(btnAdd, btnDel, btnPass, btnReauth, btnUpgrade, btnRefresh,
+                                  false, false, false);
                 return;
             }
-            String selectedUid = (String) tableModel.getValueAt(row, 0);
-            boolean isSelf     = selectedUid.equals(username);
 
-            // ===== GUARD: never allow delete or re-auth on the currently logged-in user =====
-            btnDel.setEnabled(!isSelf);
-            btnPass.setEnabled(isSelf);
-            btnReauth.setEnabled(!isSelf);
-            btnUpgrade.setEnabled(true);
+            String selectedUid = (String) tableModel.getValueAt(row, 0);
+            // ===== DERIVE CONTEXT FLAGS from selected row =====
+            boolean isSelf = selectedUid.equals(username);
+            applyToolbarState(btnAdd, btnDel, btnPass, btnReauth, btnUpgrade, btnRefresh,
+                            true, isSelf, currentUserIsAdmin);
         });
 
         // ===== ADD USER ACTION =====
-        // Only wired in multi-user mode; calls useraddEntry to INSERT new user row.
-        if (DATABASE_TYPE.equals("m")) {
-            btnAdd.addActionListener(e -> {useraddEntry(username);refreshTableModel(tableModel);});
-        } else {
-            btnAdd.setEnabled(false); // ===== Single-user vault: add not applicable =====
-        }
+        // Calls useraddEntry() to INSERT a new row, then refreshes the table.
+        btnAdd.addActionListener(e -> {
+            useraddEntry(username);
+            refreshTableModel(tableModel);
+        });
 
         // ===== DELETE USER ACTION =====
-        // Calls userdelEntry after confirming the selection is not the current user.
-        // After deletion the table is refreshed automatically.
+        // Calls userdelEntry() after confirming the row is not the current user.
+        // Table is refreshed inside userdelEntry() on success.
         btnDel.addActionListener(e -> {
             int row = userTable.getSelectedRow();
             if (row < 0) return;
@@ -247,8 +242,12 @@ public class AccountManagement {
         });
 
         // ===== CHANGE PASSWORD ACTION =====
-        // Calls changeMasterPass to re-derive the vault key under a new password.
-        btnPass.addActionListener(e -> {changeMasterPass(username);refreshTableModel(tableModel);});
+        // Calls changeMasterPass() to re-derive and re-wrap the vault key under
+        // a new password, then refreshes the table so last_login updates.
+        btnPass.addActionListener(e -> {
+            changeMasterPass(username);
+            refreshTableModel(tableModel);
+        });
 
         // ===== FORCE RE-AUTH ACTION (STUB) =====
         // INTENT: Invalidate the selected user's active session token or in-memory
@@ -277,33 +276,31 @@ public class AccountManagement {
 
         // ===== UPGRADE ARGON2 PARAMS ACTION (STUB) =====
         // INTENT: Re-derive the selected user's wrapped vault key using the current
-        // recommended Argon2 parameters (ARGON2_ITER_MIN, ARGON2_MEM_MIN, ARGON2_PARA_MIN
-        // or the configured PASSWORD_LENGTH equivalent) without requiring a password change.
+        // recommended Argon2 parameters without requiring a password change.
         //
         // IMPLEMENTATION WOULD:
         //   1. Check the selected user is currently authenticated (vault key live in memory).
-        //      If their key is not in memory this operation cannot proceed without their
-        //      password; prompt them to log in first.
+        //      If their key is not in memory this cannot proceed; prompt them to log in first.
         //   2. Retrieve the current vault key for that user from the in-memory session.
         //   3. Generate a new random salt (SecureRandom, 16 bytes minimum).
         //   4. Re-wrap the vault key using AES-GCM with a new KDF output derived from
         //      the user's existing password + new salt + upgraded Argon2 params.
         //   5. Call backend.rekeyUser(conn, target, newWrappedVK, newSalt, newIV,
         //      ARGON2_ITER_MIN, ARGON2_MEM_MIN, ARGON2_PARA_MIN) which UPDATEs the
-        //      users row in a single transaction (no window with two valid wrapped keys).
+        //      users row in a single transaction (no window where two valid wrapped keys exist).
         //   6. Wipe the old wrapped_vk from memory before returning.
         //   7. Refresh the table so the upgraded Argon2 values appear immediately.
-        //   8. Show a success toast confirming the params were upgraded.
+        //   8. Show a success toast confirming params were upgraded.
         btnUpgrade.addActionListener(e -> {
             // ===== STUB: no backend call made; intent documented above =====
             int row = userTable.getSelectedRow();
             if (row < 0) return;
             String target = (String) tableModel.getValueAt(row, 0);
-            ToastManager.info(parent, "Upgrade Argon2 params for \"" + target + "\" (not yet implemented)");
+            ToastManager.info(parent, "Upgrade Argon2 for \"" + target + "\" (not yet implemented)");
         });
 
         // ===== REFRESH ACTION =====
-        // Re-polls the users table and rebuilds the table model in-place.
+        // Re-polls the users table and rebuilds the model in-place.
         // Called automatically after add/delete; also exposed for manual use.
         btnRefresh.addActionListener(e -> {
             refreshTableModel(tableModel);
@@ -329,6 +326,138 @@ public class AccountManagement {
         dialog.setContentPane(root);
         dialog.setVisible(true);
     }
+    // ===== CURRENT USER ROLE LOOKUP =====
+    private String lookupCurrentUserRole() {
+        String sql = "SELECT role FROM users WHERE user_id = ?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, username);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) return rs.getString("role");
+            }
+        } catch (SQLException ex) {
+            if (DEBUG) ex.printStackTrace();
+        }
+        return "user"; // ===== FAIL SECURE: deny admin controls if role cannot be confirmed =====
+    }
+
+
+    // ===================================================================
+    // ===== TOOLBAR STATE MANAGER
+    // ===================================================================
+
+    /**
+     * Single source of truth for all toolbar button visibility and enabled state.
+     * Called once on dialog open (no selection) and again on every row selection change.
+     * No other code in this class may call setVisible() or setEnabled() on toolbar buttons.
+     *
+     * Button matrix by vault type and selection context:
+     *
+     *   SINGLE-USER vault ("s"):
+     *     Only Change Password is visible; all multi-user controls are hidden.
+     *     The logged-in user can only change their own password.
+     *
+     *   MULTI-USER vault ("m"), no row selected:
+     *     Add is enabled. Del, Re-auth, Upgrade disabled (need a target row).
+     *     Change Password disabled (need to know whose password to change).
+     *
+     *   MULTI-USER vault ("m"), self selected:
+     *     Change Password enabled (own password only).
+     *     Del and Re-auth disabled (cannot act on yourself).
+     *     Upgrade enabled (can upgrade your own params).
+     *
+     *   MULTI-USER vault ("m"), other user selected, current user is admin:
+     *     All buttons enabled except Change Password (admins change others' params,
+     *     not their passwords; the other user must change their own password).
+     *
+     *   MULTI-USER vault ("m"), other user selected, current user is NOT admin:
+     *     All destructive buttons disabled; only Change Password (own) stays enabled.
+     *
+     * @param btnAdd        Add User button
+     * @param btnDel        Delete User button
+     * @param btnPass       Change Password button
+     * @param btnReauth     Force Re-auth button
+     * @param btnUpgrade    Upgrade Argon2 Params button
+     * @param btnRefresh    Refresh table button
+     * @param hasSelection  true when a row is selected in the table
+     * @param isSelf        true when the selected row is the logged-in user
+     * @param isAdmin       true when the selected row's role is "admin"
+     */
+    private void applyToolbarState(JButton btnAdd, JButton btnDel, JButton btnPass,
+                                   JButton btnReauth, JButton btnUpgrade, JButton btnRefresh,
+                                   boolean hasSelection, boolean isSelf, boolean isAdmin) {
+
+        // ===== SINGLE-USER VAULT: hide all multi-user controls =====
+        if (DATABASE_TYPE.equals("s")) {
+            btnAdd.setVisible(false);
+            btnDel.setVisible(false);
+            btnReauth.setVisible(false);
+            btnUpgrade.setVisible(false);
+            btnRefresh.setVisible(false);
+
+            // ===== CHANGE PASSWORD: always visible, always enabled for own account =====
+            btnPass.setVisible(true);
+            btnPass.setEnabled(true);
+            return;
+        }
+
+        // ===== MULTI-USER VAULT: all buttons visible =====
+        btnAdd.setVisible(true);
+        btnDel.setVisible(true);
+        btnPass.setVisible(true);
+        btnReauth.setVisible(true);
+        btnUpgrade.setVisible(true);
+        btnRefresh.setVisible(true);
+
+        if (isAdmin && isSelf) {
+            btnAdd.setEnabled(true);
+            btnDel.setEnabled(false);
+            btnPass.setEnabled(true);
+            btnReauth.setEnabled(true);
+            btnUpgrade.setEnabled(true);
+            btnRefresh.setEnabled(true);
+            return;
+        }
+        if (isAdmin) {
+            btnAdd.setEnabled(true);
+            btnDel.setEnabled(true);
+            btnPass.setEnabled(false);
+            btnReauth.setEnabled(true);
+            btnUpgrade.setEnabled(true);
+            btnRefresh.setEnabled(true);
+            return;
+        }
+
+        // ===== NO SELECTION: only Add and Refresh are actionable =====
+        if (!hasSelection) {
+            btnAdd.setEnabled(false);
+            btnDel.setEnabled(false);
+            btnPass.setEnabled(false);
+            btnReauth.setEnabled(false);
+            btnUpgrade.setEnabled(false);
+            btnRefresh.setEnabled(true);
+            return;
+        }
+
+        // ===== SELF SELECTED: own row =====
+        if (isSelf) {
+            btnAdd.setEnabled(false);
+            btnDel.setEnabled(false);
+            btnPass.setEnabled(true);
+            btnReauth.setEnabled(false);
+            btnUpgrade.setEnabled(false);
+            btnRefresh.setEnabled(true);
+            return;
+        }
+
+        // ===== OTHER USER SELECTED, current user is NOT admin: read-only =====
+        // Non-admin users can see the table but cannot act on other accounts.
+        btnAdd.setEnabled(false);
+        btnDel.setEnabled(false);
+        btnPass.setEnabled(false);
+        btnReauth.setEnabled(false);
+        btnUpgrade.setEnabled(false);
+        btnRefresh.setEnabled(false);
+    }
 
 
     // ===================================================================
@@ -337,9 +466,7 @@ public class AccountManagement {
 
     /**
      * Queries the users table and builds a non-editable DefaultTableModel.
-     * Columns: Username, Role, argon2_iter, argon2_mem, argon2_para, last_login, status.
-     *
-     * Argon2 columns store raw integers so the Argon2CellRenderer can compare
+     * Argon2 columns store raw integers so Argon2CellRenderer can compare
      * them against the OWASP minimums for color-coding.
      *
      * @return populated DefaultTableModel, or empty model on query failure
@@ -377,11 +504,11 @@ public class AccountManagement {
              ResultSet rs = ps.executeQuery()) {
 
             while (rs.next()) {
-                String userId     = rs.getString("user_id");
-                String role       = rs.getString("role");
-                int    iter       = rs.getInt("argon2_iter");
-                int    mem        = rs.getInt("argon2_mem");
-                int    para       = rs.getInt("argon2_para");
+                String userId        = rs.getString("user_id");
+                String role          = rs.getString("role");
+                int    iter          = rs.getInt("argon2_iter");
+                int    mem           = rs.getInt("argon2_mem");
+                int    para          = rs.getInt("argon2_para");
                 byte[] lastLoginBlob = rs.getBytes("last_login");
 
                 // ===== DERIVE DISPLAY VALUES from raw column data =====
@@ -411,14 +538,14 @@ public class AccountManagement {
             Instant instant = Instant.parse(raw);
             return LAST_LOGIN_FMT.format(instant);
         } catch (Exception ex) {
-            // ===== FALLBACK: return raw string if parsing fails =====
+            // ===== FALLBACK: return raw string if ISO-8601 parsing fails =====
             return new String(blob, StandardCharsets.UTF_8);
         }
     }
 
     /**
      * Derives a human-readable activity status from the last_login timestamp.
-     * Thresholds: Active (<1h), Recent (<48h), Idle (>=48h), Never (null).
+     * Thresholds: Active (less than 1h), Recent (less than 48h), Idle (48h or more), Never (null).
      *
      * @param blob raw bytes from the last_login column
      * @return status label string
@@ -444,10 +571,10 @@ public class AccountManagement {
 
     /**
      * Colors Argon2 parameter cells relative to a minimum threshold:
-     *   Green  (success color) = meets or exceeds the OWASP minimum
-     *   Amber  (warning color) = below the minimum; upgrade recommended
+     *   Green  (ThemeManager.SUCCESS) = meets or exceeds the OWASP minimum
+     *   Amber  (ThemeManager.WARNING) = below the minimum; upgrade recommended
      *
-     * Attach one instance per Argon2 column, passing the relevant minimum.
+     * One instance is attached per Argon2 column with its own minimum value.
      */
     private static class Argon2CellRenderer extends DefaultTableCellRenderer {
 
@@ -467,14 +594,14 @@ public class AccountManagement {
 
             if (!isSelected && value instanceof Integer) {
                 int v = (Integer) value;
-                // ===== COLOR CODE: green if meets minimum, amber if below =====
+                // ===== COLOR CODE: green if meets OWASP minimum, amber if below =====
                 if (v >= minimum) {
-                    setForeground(ThemeManager.SUCCESS);  // ===== OWASP minimum met =====
+                    setForeground(ThemeManager.SUCCESS); // ===== OWASP minimum met =====
                 } else {
-                    setForeground(ThemeManager.WARNING);  // ===== Below recommended minimum =====
+                    setForeground(ThemeManager.WARNING); // ===== Below recommended minimum =====
                 }
             } else {
-                // ===== SELECTED ROW: use default selection foreground =====
+                // ===== SELECTED ROW: revert to table selection foreground =====
                 setForeground(table.getSelectionForeground());
             }
             return this;
@@ -520,7 +647,6 @@ public class AccountManagement {
     /**
      * Prompts for new user credentials, validates password strength and username
      * uniqueness, then inserts a new row into the users table via the backend.
-     * After a successful add the table model is refreshed automatically.
      *
      * @param current_username the logged-in username; new name must differ from this
      */
@@ -575,7 +701,7 @@ public class AccountManagement {
      */
     protected void userdelEntry(String target, DefaultTableModel model, JDialog dialog) {
 
-        // ===== GUARD: must not delete the currently logged-in admin =====
+        // ===== GUARD: must not delete the currently logged-in user =====
         if (target.equals(username)) {
             ToastManager.error(parent, "Cannot delete the currently logged-in user.");
             return;

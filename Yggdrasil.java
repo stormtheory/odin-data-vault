@@ -673,6 +673,7 @@ public class Yggdrasil {
                 argon2_para INTEGER,
                 created_at  BLOB,
                 last_login  BLOB,
+                forceReKey  TEXT,     
                 iv          BLOB
             )
         """);
