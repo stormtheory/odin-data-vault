@@ -451,7 +451,7 @@ public class Yggdrasil {
         byte[] enc_tag   = encryptData(tag,   iv, Vault_Use_Key);
 
         if (folderId == null || folderId.isBlank()) folderId = "2245"; //defaut
-        if (creationDate == null || creationDate.isBlank()) creationDate = timeCheck_UTC_time();
+        if (creationDate == null || creationDate.isBlank() || creationDate.equals("2245")) creationDate = timeCheck_UTC_time();
         if (revisionDate == null || revisionDate.isBlank()) revisionDate = creationDate;
 
         if (DEBUG) System.out.println("Folder: " + folderId + " | Creation: " + creationDate + " | Revision: " + revisionDate);
