@@ -37,6 +37,7 @@ Upon class project completion, the project was compared to Bitwarden, after read
 
 > [!NOTE]
 > If any issues or suggestions, or even just a what if crosses you please submit feedback at https://github.com/stormtheory/odin-data-vault/issues. Would love to hear from you. Enjoy the new update :)
+>
 > &mdash; Stormtheory
 
 ---
@@ -314,7 +315,7 @@ No external database or installer required, unless you want it.
   * HIGH     → the RFC 9106 authors' explicit recommendation for sensitive credentials
   * PARANOID → Vault-grade master key derivation, exceeds all published standards - you derive it rarely, so you can afford to make it brutal
 
-<img width="350" height="275" alt="Image" src="https://github.com/user-attachments/assets/73c6bf6b-3ec3-468e-ae1a-0ee700eee965" />
+<img width="450" height="320" alt="Image" src="https://github.com/user-attachments/assets/73c6bf6b-3ec3-468e-ae1a-0ee700eee965" />
 <img width="980" height="660" alt="Image" src="https://github.com/user-attachments/assets/c87def31-8ae7-4deb-9eae-e5d00fac786e" />
 
 ## Decryption
@@ -352,4 +353,42 @@ C Libraries **Already Baked-in**:
   * `json-20251224.jar`
   * `pdfbox-3.0.7.jar`
 
+---
+---
+# Odin Bash Secure Note
+(bash + zenity + gpg + less + editor{vim|nano})
+### Purpose:
+Secure Note is a zero-install solution for encrypting personal notes and passwords on any standard Linux system.
+The core problem it solves: you need secure local storage, but you are on a locked-down machine where installing software like KeePass, 
+Bitwarden, or any password manager is not permitted. Rather than relying on a plaintext file, a browser's saved passwords, or nothing at all, 
+Secure Note leverages tools that ship with virtually every Linux distribution and are deeply tied to core system functionality making them unlikely 
+to ever be removed: gpg, bash, zenity, vim/nano, and less.
+The workflow keeps plaintext exposure to an absolute minimum. Decrypted content never touches the disk; it lives only in /dev/shm, a memory-backed 
+RAM filesystem. You view notes through less with no terminal history leak, and the GUI passphrase prompt via zenity keeps your password off the command 
+line and out of process lists. When you are done, the plaintext is gone.
+The dependency choices are deliberate:
 
+gpg is a foundational cryptography tool present on nearly every distro, used by package managers themselves for signature verification. 
+bash and less are baseline POSIX utilities.
+zenity ships with most GNOME-adjacent environments and is a common dependency for desktop scripts.
+vim (default) gives fine-grained control over swap files and undo history, making it the safer editor choice over nano.
+
+<img width="600" height="370" alt="Image" src="https://github.com/user-attachments/assets/9e542e4c-9aea-4caa-a178-e1b6065b9f78" />
+
+### Editor hardening
+The script defaults to vim with a deliberately stripped invocation: -n disables the swap file entirely, -u NONE skips loading any 
+vimrc, and -i NONE prevents writing a viminfo history file. Combined with the temp file being created at 600 permissions in /dev/shm, 
+this means vim leaves no artifacts anywhere on disk during the edit session.
+
+Edit the following lines in the script:
+        EDITOR_CMD=(vim -n -u NONE -i NONE)
+        EDITOR_CHOICE=(vim)
+
+nano is available as a commented-out fallback, but it requires significantly more environment surgery to achieve a similar level of hygiene. 
+The nano invocation redirects the entire XDG config tree 
+(XDG_CONFIG_HOME, XDG_STATE_HOME, XDG_CACHE_HOME) to /nonexistent, forces NANORC to /dev/null, 
+and passes --restricted --nohelp --noconvert --nowrap --backupdir=/dev/null to suppress backups, conversion logs, and any config-driven behavior. 
+It achieves roughly the same outcome but requires trusting more moving parts, which is why vim is the recommended default.
+
+The practical difference: vim's hardening is controlled entirely by command-line flags with well-defined, auditable behavior. 
+Nano's hardening depends on environment variable overrides, which are slightly more fragile across distribution variations and shell environments.
