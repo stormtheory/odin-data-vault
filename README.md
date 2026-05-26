@@ -28,6 +28,18 @@ Upon class project completion, the project was compared to Bitwarden, after read
 | Import/Export  | PBKDF2-SHA256 Only        | **Argon2id** at any setting |
 
 ---
+
+> [!IMPORTANT]
+> As always make sure the new version works with your database before moving to the next version and always do an Encrypted Odin JSON export/backup. 
+
+> [!WARNING]
+> **Ensure you remember your Master Password as there is NO WAY TO RECOVER WITHOUT IT.** You are the only one that can get to your data period end of subject, which is the whole point of Odin.
+
+> [!NOTE]
+> If any issues or suggestions, or even just a what if crosses you please submit feedback at https://github.com/stormtheory/odin-data-vault/issues. Would love to hear from you. Enjoy the new update :)
+> &mdash; Stormtheory
+
+---
 <div align="center">
 
 <figure>
@@ -91,10 +103,8 @@ Upon class project completion, the project was compared to Bitwarden, after read
   * `vault`: stores encrypted (tag, username, password, data), and IV
   * `users`: stores username, role, wrapped_vk(multi-user), user_salt, argon2_parameters
   * `meta`: stores vault_salt, database_version, database_type, and future metadata
-  * `server`
-  * `folders`
-
-Tags, Usernames, and Passwords are stored as encrypted binary blobs.
+  * `folders`: Defines the folder names and IDs for them
+  * `server`: Will be used in the future for server connections for syncing
 
 ---
 
@@ -113,27 +123,48 @@ No external database or installer required, unless you want it.
 ---
 
 ## ⚠️ Limitations
+> [!NOTE]
+> What Odin helps protect you from: if the data vault were physically or digitally stolen Odin should prevent or slowdown the hacker. This is all dependent on which security level, type, and Master Password strength you choose and how much the hacker wants in or can afford. I cannot guarantee everything here but I can tell you we give the best effort with an ever evolving security level, so long as the project is supported, as me myself, I want to keep my data safe as well.
 
-* Memory may not be fully cleared, always a risk, but data is always encrypted on disk. (Work around: turn off use of RAM swap space)(Reboot/Shutdown of your machine clears the memory)
-* Will not save you from keyloggers or other kinds of malware
-* What Odin helps protect you from: if the data vault were physically or digitally stolen Odin should prevent or slowdown the hacker. This is all dependent on which security level, type, and Master Password strength you choose and how much the hacker wants in or can afford. I cannot guarantee everything here but I can tell you we give the best effort with an ever evolving security level, so long as the project is supported, as me myself, I want to keep my data safe as well.
 
+> [!IMPORTANT]
+> What any data/password vault out there can not protect you from...
+> * Yourself (insider threats, misconfiguration, weak Master Password(s))
+> * Quantum decryption of today's encrypted-at-rest data (harvest now, decrypt later) (See "Argon2 - Strength Levels" below and chart for more details)
+> * Amnesia - losing or forgetting your Master Password entirely
+> * The keys being stolen (if your MasterPassword is found out you are compromised, the vault is open)
+> * Zero-day exploits targeting the vault software itself
+> * Metadata leakage (what data exists, who accesses it, when)
+> * Coercion ("rubber hose cryptanalysis" - forced decryption)
+> * Supply chain attacks on the vault vendor
+> * A compromised endpoint reading data after it's been decrypted for legitimate use
+> * Backup sprawl - copies of the data that never made it into the vault
+> * Legal compulsion (warrants, subpoenas, national security letters) (This one for Odin is diffcult, becuase we can not access your data without your Master Password, therefore you have to open it.)
+> * Social engineering (attackers bypass the vault by manipulating people) (With Odin, that's only you as they will need the Master Password)
+> 
+> The vault protects stored data. The moment data moves, gets used, or humans get involved, the attack surface explodes. Security is a system, not a product.
+
+
+> [!IMPORTANT]
+> Memory (RAM) may not be fully cleared, always a risk, but data is always encrypted on disk.
+> (Work around: turn off use of RAM swap space)(Reboot/Shutdown of your machine clears the memory)
 ---
 
 ## 🚀 Future Improvements
 
 **[ New Features ]**
-* Multiple item delete
-* Passphrase Generator
-* "folders":  
-* "totp":
+- [X] Multiple item delete
+- [ ] Passphrase Generator
+- [ ] "folders":  
+- [ ] "totp":
 
 **[ Big Ticket Items ]**
-* Browser Extension for Firefox and Chrome **(Looking into but maybe not be up to the level of security and privacy worth doing)**
-* iOS App
-* Local encrypted file storage - Store encrypted documents and photos
+- [ ] Browser Extension for Firefox and Chrome **(Looking into but maybe not be up to the level of security and privacy worth doing)**
+- [ ] iOS App
+- [ ] Local encrypted file storage - Store encrypted documents and photos
 
-* // Make change to changing vault key to add in redo server table (Not used yet)
+**[ MISC ]**
+- [ ] Make changes to "changing vault key" to add in redo server table (Not used yet)
 
 **[[ Long-term Goal ]]**
 **[[[ Server-Based Option ]]]**
