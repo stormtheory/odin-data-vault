@@ -49,6 +49,8 @@ public class Odin {
 // ===== STATIC SHARED FIELDS =====
     protected static Mimir               databaseutilities = new Mimir();
     protected static int                 addupdate_id;
+    protected static String creationDate; // PlaceHolders // gets filled on the other side if blank
+    protected static String revisionDate; // PlaceHolders // gets filled on the other side if blank
 
 // ===== MASTER PASSWORD - written by createNewMasterPass(), read by Login =====
     protected char[]  masterPassword = new char[0];
@@ -706,10 +708,12 @@ public class Odin {
                     } catch (Exception e) {
                         addDetailField(field.label, "[decrypt error]", false, credIndex, i);
                     }
-                    detailContent.add(Box.createVerticalStrut(6));
                 }
             }
         }
+        //detailContent.add(Box.createVerticalStrut(6));
+        addDetailField("Revision", c.revisionDate, false, credIndex, -1);
+        addDetailField("Creation", c.creationDate, false, credIndex, -1);
         detailContent.revalidate();
         detailContent.repaint();
     }
@@ -1393,7 +1397,7 @@ public class Odin {
                 if (credIndex >= 0) {
                     Yggdrasil.Credential c        = credentials.get(credIndex);
                     Futhark.EntryType    type     = Futhark.forKey(c.type);
-                    String creationDate = c.creationDate;
+                    creationDate = c.creationDate;
 
                     // ===== TAG - always present =====
                     tagField.setText(new String(c.tag));
@@ -1503,14 +1507,13 @@ public class Odin {
                         dataFields[i] = ta.getText().toCharArray();
                     }
                 }
-
-                String creationDate=" "; // PlaceHolders // gets filled on the other side if blank
-                String revisionDate=" "; // PlaceHolders // gets filled on the other side if blank
+                
                 String folderId=" "; // PlaceHolders
                 if (mode.equals("update")) {
+                    if (creationDate == null || creationDate.isBlank()) creationDate = " ";
                     backend.updateEntry(conn, addupdate_id, tagField.getText().toCharArray(), dataFields, folderId, selectedType.typeKey.toCharArray(), creationDate);
                 } else {
-                    backend.addEntry(conn, tagField.getText().toCharArray(), selectedType.typeKey.toCharArray(), dataFields, DATABASE_TYPE, creationDate, revisionDate, folderId);
+                    backend.addEntry(conn, tagField.getText().toCharArray(), selectedType.typeKey.toCharArray(), dataFields, DATABASE_TYPE, folderId, null, null);
                 }
 
                 for (char[] d : dataFields) if (d != null) Yggdrasil.wipeCharArray(d);

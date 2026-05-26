@@ -41,12 +41,12 @@ public class Yggdrasil {
     private static List<Credential> credentials = new ArrayList<>();
 
     // ===== DATA CLASS =====
-    // One Credential instance per vault row — all sensitive fields stay encrypted
+    // One Credential instance per vault row - all sensitive fields stay encrypted
     // in memory; only tag, username, notes are decrypted on load for table display
     protected static class Credential {
         protected int    id;
-        protected String type;          // entry type key — "account", "note", "card" etc.
-        protected char[] tag;           // decrypted label/name — shown in table
+        protected String type;          // entry type key - "account", "note", "card" etc.
+        protected char[] tag;           // decrypted label/name - shown in table
         protected boolean favorite;
         protected String folderId;
         protected String creationDate;
@@ -72,8 +72,8 @@ public class Yggdrasil {
         }
 
         /**
-         * Wipe plaintext fields — call when the credential is evicted from memory.
-         * Does NOT wipe encrypted bytes — those are needed for on-demand decryption.
+         * Wipe plaintext fields - call when the credential is evicted from memory.
+         * Does NOT wipe encrypted bytes - those are needed for on-demand decryption.
          * Call close_wipe() separately when the vault is shutting down.
          */
         protected void wipe() {
@@ -81,7 +81,7 @@ public class Yggdrasil {
         }
 
         /**
-         * Wipe encrypted bytes and IV — call only at full shutdown.
+         * Wipe encrypted bytes and IV - call only at full shutdown.
          * Even ciphertext shouldn't linger in memory longer than necessary.
          */
         protected void close_wipe() {
@@ -96,7 +96,7 @@ public class Yggdrasil {
     }
 
     // ===== INIT (GetFiredUp) =====
-    // A salt is random data added before key derivation — prevents rainbow table attacks
+    // A salt is random data added before key derivation - prevents rainbow table attacks
     protected void GetFiredUp(char[] masterPassword, byte[] vault_salt, Connection conn, String username, String type, boolean debug) throws Exception {
         DEBUG = debug;
         System.out.println(username);
@@ -113,7 +113,7 @@ public class Yggdrasil {
 
         if (type.equals("m")) {
             if (VK_STATUS.equals("gen")) {
-                // ===== FIRST LOGIN — generate vault key and wrap with user key =====
+                // ===== FIRST LOGIN - generate vault key and wrap with user key =====
                 Vault_KEY = generateVaultKey();
                 byte[] wrappedKey = wrapVaultKey(User_AES_Key);
                 try (PreparedStatement update = conn.prepareStatement(
@@ -126,13 +126,13 @@ public class Yggdrasil {
                 wipeByteArray(wrappedKey);
 
             } else if (VK_STATUS.equals("true")) {
-                // ===== EXISTING VAULT — unwrap vault key with user key =====
+                // ===== EXISTING VAULT - unwrap vault key with user key =====
                 String sql = "SELECT wrapped_vk FROM users WHERE user_id = ?";
                 PreparedStatement stmt = conn.prepareStatement(sql);
                 stmt.setString(1, username);
                 ResultSet rs = stmt.executeQuery();
 
-                // AESWrapPad — unwraps the vault key using the user's derived key
+                // AESWrapPad - unwraps the vault key using the user's derived key
                 Cipher cipher = Cipher.getInstance("AESWrapPad");
                 cipher.init(Cipher.UNWRAP_MODE, new SecretKeySpec(User_AES_Key, "AES"));
                 SecretKey tempKey = (SecretKey) cipher.unwrap(
@@ -174,7 +174,7 @@ public class Yggdrasil {
         Argon2Profile.Profile profile =  Argon2Profile.profileSelector(VaultLevel);
         int[] params = {profile.iterations(), profile.memoryKb(), profile.parallelism()};
 
-        // Generate a fresh salt — never reuse a salt even for the same user
+        // Generate a fresh salt - never reuse a salt even for the same user
         byte[] new_user_salt = new byte[SALT_SIZE];
         new SecureRandom().nextBytes(new_user_salt);
 
@@ -215,11 +215,11 @@ public class Yggdrasil {
     }
 
     // ===== RE-ENCRYPT WHOLE VAULT =====
-    // Used during single-user password change — decrypts all rows with old key
+    // Used during single-user password change - decrypts all rows with old key
     // and re-encrypts with new key.  Each row gets a fresh IV.
     protected void decryptEncryptWholeVault(Connection conn, byte[] old_key, byte[] new_key)
         throws Exception {
-        // SELECT all data columns — vault is the renamed vault table
+        // SELECT all data columns - vault is the renamed vault table
         String sql = "SELECT id, type, folderId, tag, data0, data1, data2, data3, data4, data5, data6, data7, data8, revisionDate, creationDate, iv FROM vault";
         try (PreparedStatement stmt = conn.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
@@ -259,7 +259,7 @@ public class Yggdrasil {
                     update.setInt(16, rs.getInt("id"));
                     int rows = update.executeUpdate();
                     if (rows == 0) {
-                        throw new IllegalStateException("Re-encrypt failed — id not found: " + rs.getInt("id"));
+                        throw new IllegalStateException("Re-encrypt failed - id not found: " + rs.getInt("id"));
                     }
                     System.out.println("Re-encrypted entry: " + rs.getInt("id"));
                 }
@@ -273,7 +273,7 @@ public class Yggdrasil {
     }
 
     // ===== CLEANUP WIPE DOWN =====
-    // Called by shutdown hook — zeros all key material and credential data in memory
+    // Called by shutdown hook - zeros all key material and credential data in memory
     protected static void cleanupWipeDown(boolean DEBUG) throws Exception {
         System.out.println("Cleaning Backend");
         wipeByteArray(User_AES_Key);
@@ -283,7 +283,7 @@ public class Yggdrasil {
         wipeCredentialList(credentials, true, DEBUG);
     }
 
-    // Wipe all credentials in the list — clears both plaintext and ciphertext fields
+    // Wipe all credentials in the list - clears both plaintext and ciphertext fields
     protected static void wipeCredentialList(List<Credential> list, boolean EXIT, boolean DEBUG) {
         if (list == null) return;
         for (Credential c : list) {
@@ -297,7 +297,7 @@ public class Yggdrasil {
     }
 
     // ===== LOAD ARGON2 PARAMS FROM DB =====
-    // Always use the parameters the vault was CREATED with — never hardcode at derive-time
+    // Always use the parameters the vault was CREATED with - never hardcode at derive-time
     private int[] loadArgon2Params(Connection conn, String username) throws Exception {
         String sql = "SELECT argon2_iter, argon2_mem, argon2_para FROM users WHERE user_id = ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -320,7 +320,7 @@ public class Yggdrasil {
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, username);
             try (ResultSet rs = ps.executeQuery()) {
-                // Guard — returning null salt would silently weaken Argon2
+                // Guard - returning null salt would silently weaken Argon2
                 if (!rs.next()) {
                     throw new IllegalStateException("User not found loading salt: " + username);
                 }
@@ -334,13 +334,13 @@ public class Yggdrasil {
     }
 
     // ===== KEY DERIVATION =====
-    // Argon2id — memory-hard, resistant to GPU and side-channel attacks
-    // Produces raw bytes used directly as AES-256 key — no PBKDF2 involvement
+    // Argon2id - memory-hard, resistant to GPU and side-channel attacks
+    // Produces raw bytes used directly as AES-256 key - no PBKDF2 involvement
     private byte[] deriveKey(char[] password, int[] params, String username,
                               byte[] u_salt, Connection conn) throws Exception {
         Argon2Advanced argon2 = (Argon2Advanced) Argon2Factory.createAdvanced(Argon2Types.ARGON2id);
 
-        // rawHash() returns raw bytes — exactly what AES needs as input
+        // rawHash() returns raw bytes - exactly what AES needs as input
         byte[] keyBytes = argon2.rawHash(params[0], params[1], params[2], password, u_salt);
 
         // AES-256 requires exactly 32 bytes
@@ -351,22 +351,22 @@ public class Yggdrasil {
     }
 
     private static byte[] generateVaultKey() throws Exception {
-        // BouncyCastle SecureRandom — avoids JDK default provider variance
+        // BouncyCastle SecureRandom - avoids JDK default provider variance
         SecureRandom random = SecureRandom.getInstance("DEFAULT", "BC");
-        byte[] keyBytes = new byte[32]; // 256-bit key — fully wipeable byte[]
+        byte[] keyBytes = new byte[32]; // 256-bit key - fully wipeable byte[]
         random.nextBytes(keyBytes);
         return keyBytes;
     }
 
     // ===== ENCRYPT =====
     // AES-256-GCM: AES is the lock 🔒, GCM is the tamper seal 🧾
-    // IV is random per-entry — same input never produces same ciphertext
+    // IV is random per-entry - same input never produces same ciphertext
     private static byte[] encryptData(char[] plaintext, byte[] iv, byte[] key) throws Exception {
         byte[] data = new String(plaintext).getBytes(StandardCharsets.UTF_8);
         return encryptData(data, iv, key);
     }
 
-    // Overload — accepts byte[] directly for re-encryption during vault password change
+    // Overload - accepts byte[] directly for re-encryption during vault password change
     private static byte[] encryptData(byte[] data, byte[] iv, byte[] key) throws Exception {
         KeyParameter keyParam = new KeyParameter(key);
         GCMModeCipher cipher  = GCMBlockCipher.newInstance(AESEngine.newInstance());
@@ -383,7 +383,7 @@ public class Yggdrasil {
     }
 
     // ===== DECRYPT (ON DEMAND ONLY) =====
-    // Returns plaintext as char[] — caller must wipe after use
+    // Returns plaintext as char[] - caller must wipe after use
     // Three-arg version: explicit key passed in (for re-encryption, loading)
     protected char[] decryptData(byte[] encrypted_data, byte[] iv) throws Exception {
         return decryptData(encrypted_data, iv, Vault_Use_Key);
@@ -407,7 +407,7 @@ public class Yggdrasil {
 
     // ===== LOAD ALL CREDENTIALS FROM DB =====
     // Decrypts tag and notes on load (shown in table/detail).
-    // All other fields (data0..data8) kept encrypted — decrypted on demand only.
+    // All other fields (data0..data8) kept encrypted - decrypted on demand only.
     protected List<Credential> loadAll(Connection conn) throws Exception {
         wipeCredentialList(credentials, false, DEBUG); // wipe previous list before replacing
         List<Credential> result = new ArrayList<>();
@@ -421,14 +421,14 @@ public class Yggdrasil {
                 c.id    = rs.getInt("id");
                 c.iv    = rs.getBytes("iv");
                 
-                // Decrypt type and tag — needed for table display without on-demand
+                // Decrypt type and tag - needed for table display without on-demand
                 c.type  = new String(decryptData(rs.getBytes("type"),   c.iv, Vault_Use_Key));
                 c.tag   = decryptData(rs.getBytes("tag"),   c.iv, Vault_Use_Key);
                 c.folderId = new String(decryptData(rs.getBytes("folderId"),   c.iv, Vault_Use_Key));
                 c.creationDate  = new String(decryptData(rs.getBytes("creationDate"),   c.iv, Vault_Use_Key));
                 c.revisionDate  = new String(decryptData(rs.getBytes("revisionDate"),   c.iv, Vault_Use_Key));
                 
-                // Store all data fields as encrypted bytes — not decrypted until needed
+                // Store all data fields as encrypted bytes - not decrypted until needed
                 for (int i = 0; i < Futhark.DATA_COLUMNS.length; i++) {
                     c.dataFields[i] = rs.getBytes(Futhark.DATA_COLUMNS[i]);
                 }
@@ -442,22 +442,25 @@ public class Yggdrasil {
     // ===== ADD ENTRY =====
     // Encrypts all fields and writes one row to the vault table.
     // dataFields array maps index 0→data0, 1→data1, ... 8→data8
-    protected void addEntry(Connection conn, char[] tag, char[] type, char[][] dataFields, String dbType, String creationDate, String revisionDate, String folderId) throws Exception {
+    protected void addEntry(Connection conn, char[] tag, char[] type, char[][] dataFields, String dbType, String folderId) throws Exception {
+        throw new UnsupportedOperationException("addEntry(6-arg) must be overridden in subclass: " + this.getClass().getName());
+    }
+    protected void addEntry(Connection conn, char[] tag, char[] type, char[][] dataFields, String dbType, String folderId, String creationDate, String revisionDate) throws Exception {
         byte[] iv = generateIV(); // single IV per row
         byte[] enc_type  = encryptData(type,  iv, Vault_Use_Key);
         byte[] enc_tag   = encryptData(tag,   iv, Vault_Use_Key);
 
-        if (folderId == null || folderId.isEmpty() || folderId.isBlank()) creationDate = "2245"; //defaut
-        if (creationDate == null || creationDate.isEmpty() || creationDate.isBlank()) creationDate = timeCheck_UTC_time();
-        if (revisionDate == null || revisionDate.isEmpty() || revisionDate.isBlank()) revisionDate = creationDate;
+        if (folderId == null || folderId.isBlank()) folderId = "2245"; //defaut
+        if (creationDate == null || creationDate.isBlank()) creationDate = timeCheck_UTC_time();
+        if (revisionDate == null || revisionDate.isBlank()) revisionDate = creationDate;
 
-        System.out.println(folderId + creationDate + revisionDate);
+        if (DEBUG) System.out.println("Folder: " + folderId + " | Creation: " + creationDate + " | Revision: " + revisionDate);
 
         byte[] enc_fI   = encryptData(folderId.toCharArray(),   iv, Vault_Use_Key);
         byte[] enc_cd   = encryptData(creationDate.toCharArray(),   iv, Vault_Use_Key);
         byte[] enc_rd   = encryptData(revisionDate.toCharArray(),   iv, Vault_Use_Key);
 
-        // Encrypt each data field — null slots write SQL NULL
+        // Encrypt each data field - null slots write SQL NULL
         byte[][] enc_data = new byte[Futhark.DATA_COLUMNS.length][];
         for (int i = 0; i < dataFields.length && i < enc_data.length; i++) {
             if (dataFields[i] != null && dataFields[i].length > 0) {
@@ -497,7 +500,7 @@ public class Yggdrasil {
         byte[] enc_fI = encryptData(folderId.toCharArray(), iv, Vault_Use_Key);
         byte[] enc_tag = encryptData(tag, iv, Vault_Use_Key);
 
-        // Encrypt each data field — null slots write SQL NULL
+        // Encrypt each data field - null slots write SQL NULL
         byte[][] enc_data = new byte[Futhark.DATA_COLUMNS.length][];
         for (int i = 0; i < dataFields.length && i < enc_data.length; i++) {
             if (dataFields[i] != null && dataFields[i].length > 0) {
@@ -531,7 +534,7 @@ public class Yggdrasil {
 
     // ===== WRAP VAULT KEY =====
     // AESWrapPad wraps the vault key using the user's derived key
-    // Wrapped key is stored in users table — unwrapped at login
+    // Wrapped key is stored in users table - unwrapped at login
     private byte[] wrapVaultKey(byte[] userKey) throws Exception {
         Cipher cipher = Cipher.getInstance("AESWrapPad");
         cipher.init(Cipher.WRAP_MODE, new SecretKeySpec(userKey, "AES"));
@@ -608,7 +611,7 @@ public class Yggdrasil {
     }
 
     // ===== IV GENERATION =====
-    // Initialization Vector — random per entry so identical inputs produce different ciphertext
+    // Initialization Vector - random per entry so identical inputs produce different ciphertext
     private static byte[] generateIV() {
         byte[] iv = new byte[IV_LENGTH];
         new SecureRandom().nextBytes(iv);
@@ -634,7 +637,7 @@ public class Yggdrasil {
         Argon2Profile.Profile profile =  Argon2Profile.profileSelector(VaultLevel);
 
         // ===== VAULT TABLE =====
-        // Generic data0..data10 columns — field meaning defined by EntrySchema per type
+        // Generic data0..data10 columns - field meaning defined by EntrySchema per type
         // Notes and tag are always present; data columns are type-specific
         stmt.execute("""
             CREATE TABLE IF NOT EXISTS vault (
@@ -764,7 +767,7 @@ public class Yggdrasil {
     }
 
     // ===== VAULT SALT HANDLING =====
-    // Salt is random per vault — prevents rainbow table attacks across vaults
+    // Salt is random per vault - prevents rainbow table attacks across vaults
     protected byte[] getOrCreateVaultSalt(Connection conn) throws Exception {
         Statement stmt = conn.createStatement();
         stmt.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value BLOB)");
