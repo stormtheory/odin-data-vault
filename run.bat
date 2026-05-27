@@ -517,7 +517,8 @@ echo [3/8] Staging classes...
 mkdir "!_STAGE!"
 xcopy /e /i "bin_!_VER!" "!_STAGE!" >nul
 mkdir "!_STAGE!\icons"
-xcopy /i icons\*.png "!_STAGE!\icons\" >nul
+mkdir "!_STAGE!\icons\shield"
+xcopy /i icons\shield\*.png "!_STAGE!\icons\shield\" >nul
 xcopy /i README.md "!_STAGE!" >nul
 xcopy /i LICENSE "!_STAGE!" >nul
 
@@ -697,7 +698,8 @@ mkdir fatjar
 :: xcopy /e /i copies class tree and needed files into fatjar
 xcopy /e /i bin fatjar >nul
 mkdir "fatjar\icons"
-xcopy /i icons\*.png "fatjar\icons\" >nul
+mkdir "fatjar\icons\shield"
+xcopy /i icons\shield\*.png "fatjar\icons\shield\" >nul
 xcopy /i README.md fatjar >nul
 xcopy /i LICENSE fatjar >nul
 :: Explode each dependency jar - these are the slow steps on large jars

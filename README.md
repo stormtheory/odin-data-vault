@@ -1,4 +1,4 @@
-<div align="center"><img width="250" height="250" alt="Image" src="https://github.com/user-attachments/assets/76ae44a2-00a7-453a-8b75-595f184bd7a2" /></div>
+<div align="center"><img width="256" height="256" alt="Image" src="https://github.com/user-attachments/assets/5fe094b1-86ba-42e7-9df1-2bf62791885c" /></div>
 <h1 align="center">Odin Data Vault</h1>
 <h3 align="center">(Java + SQLite3 + Argon2id + AES-GCM + Post Quantum Resistant)</h3>
 
@@ -155,13 +155,15 @@ No external database or installer required, unless you want it.
 
 **[ New Features ]**
 - [X] Multiple item delete
+- [-] "folders": (work started)
 - [ ] Passphrase Generator
-- [ ] "folders":  
 - [ ] "totp":
 
 **[ Big Ticket Items ]**
+- [-] iOS App (work started)
+- [-] MacOS   (work started)
+- [ ] Android App
 - [ ] Browser Extension for Firefox and Chrome **(Looking into but maybe not be up to the level of security and privacy worth doing)**
-- [ ] iOS App
 - [ ] Local encrypted file storage - Store encrypted documents and photos
 
 **[ MISC ]**
@@ -355,7 +357,9 @@ C Libraries **Already Baked-in**:
 
 ---
 ---
-# Odin Bash Secure Note
+<div align="center"><img width="256" height="256" alt="Image" src="https://github.com/user-attachments/assets/bc63a7e7-5747-49b4-b3c5-f8bd4f4e0cc7" /></div>
+---
+<h1 align="center">Odin Bash Secure Note</h1>
 (bash + zenity + gpg + less + editor{vim|nano})
 ### Purpose:
 Secure Note is a zero-install solution for encrypting personal notes and passwords on any standard Linux system.
