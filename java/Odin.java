@@ -2,6 +2,8 @@ import java.awt.*;
 import java.awt.event.*;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -180,33 +182,61 @@ public class Odin {
 
         // ===== DOUBLE-CLICK TO COPY =====
         // ===== Double-clicking any cell copies its decrypted value to clipboard =====
-        table.addMouseListener(new MouseAdapter() {
-            public void mouseClicked(MouseEvent e) {
-                int row = table.rowAtPoint(e.getPoint());
-                int col = table.columnAtPoint(e.getPoint());
-                if (DEBUG) System.out.println("ROW:" + row);
-                if (row < 0) return;
-
-                // ===== RESOLVE CREDENTIAL BY DB ID - safe under filter/search =====
-                // ===== model col 0 holds the DB id; find the matching credential by id directly. =====
-                // ===== Using id-1 or visibleRowToCredentialIndex both break when search is active =====
-                // ===== because the visible row count no longer matches the full list. =====
-                int dbId = (Integer) model.getValueAt(row, 0);
-                int credIndex = findCredentialIndexById(dbId);
-                if (credIndex < 0) return; // ===== Guard: no match found =====
-
-                // ===== SINGLE CLICK - show detail panel =====
-                if (e.getClickCount() == 1) {
-                    showDetailPanel(credIndex);
+table.addMouseListener(new MouseAdapter() {
+    public void mouseClicked(MouseEvent e) {
+        int row = table.rowAtPoint(e.getPoint());
+        int col = table.columnAtPoint(e.getPoint());
+        if (DEBUG) System.out.println("ROW:" + row);
+        if (row < 0) return;
+        int dbId = (Integer) model.getValueAt(row, 0);
+        int credIndex = findCredentialIndexById(dbId);
+        if (credIndex < 0) return; // ===== Guard: no match found =====
+        // ===== SINGLE CLICK - show detail panel =====
+        if (e.getClickCount() == 1) {
+            showDetailPanel(credIndex);
+        }
+        // ===== DOUBLE CLICK - copy field to clipboard or open URL =====
+        if (e.getClickCount() == 2) {
+            if (col == 0) return;
+            Object cellValue = model.getValueAt(row, col);
+            if (cellValue == null) return;
+            String cellText = cellValue.toString().trim();
+            boolean looksLikeUrl = cellText.startsWith("http://")
+                                || cellText.startsWith("https://")
+                                || cellText.startsWith("www.");
+            if (looksLikeUrl) {
+                // ===== Ensure scheme is present - Desktop.browse() requires it =====
+                // ===== Prepend https:// to bare www. domains =====
+                String url = cellText.startsWith("www.") ? "https://" + cellText : cellText;
+                try {
+                    if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                        // ===== Use OS default browser - works on Windows and most Linux desktops =====
+                        Desktop.getDesktop().browse(new URI(url));
+                        if (DEBUG) System.out.println("Opening URL: " + url);
+                    } else {
+                        // ===== Fallback for Linux environments without Desktop.BROWSE support =====
+                        openUrlFallback(url);
+                    }
+                } catch (URISyntaxException ex) {
+                    JOptionPane.showMessageDialog(mainFrame,
+                        "Invalid URL: " + url,
+                        "Cannot Open URL",
+                        JOptionPane.WARNING_MESSAGE);
+                        copyFieldToClipboard(credIndex, col);
+                } catch (IOException ex) {
+                    JOptionPane.showMessageDialog(mainFrame,
+                        "Could not open browser: " + ex.getMessage(),
+                        "Browser Error",
+                        JOptionPane.ERROR_MESSAGE);
+                        copyFieldToClipboard(credIndex, col);
                 }
-
-                // ===== DOUBLE CLICK - copy field to clipboard =====
-                if (e.getClickCount() == 2) {
-                    if (col == 0) return; // Never copy hidden ID column
-                    copyFieldToClipboard(credIndex, col);
-                }
+                return;
             }
-        });
+            // ===== Non-URL field - copy decrypted value to clipboard as before =====
+            copyFieldToClipboard(credIndex, col);
+        }
+    }
+});
 
         refreshTable();
 
@@ -284,6 +314,29 @@ public class Odin {
             if (credentials.get(i).id == id) return i;
         }
         return -1;
+    }
+
+    // ===== FALLBACK URL OPENER =====
+    // ===== Used when java.awt.Desktop.BROWSE is unavailable =====
+    // ===== Covers minimal Linux setups (no GUI session, some Wayland configs) =====
+    private void openUrlFallback(String url) {
+        String os = System.getProperty("os.name").toLowerCase();
+        try {
+            if (os.contains("linux")) {
+                // ===== xdg-open is the standard Linux URL dispatcher =====
+                new ProcessBuilder("xdg-open", url).start();
+            } else if (os.contains("windows")) {
+                // ===== rundll32 is a reliable Windows fallback =====
+                new ProcessBuilder("rundll32", "url.dll,FileProtocolHandler", url).start();
+            }
+            if (DEBUG) System.out.println("Fallback browser open: " + url);
+        } catch (IOException ex) {
+            // ===== Both methods failed - last resort user notification =====
+            JOptionPane.showMessageDialog(mainFrame,
+                "Could not open browser. Please copy the URL manually.",
+                "Browser Unavailable",
+                JOptionPane.ERROR_MESSAGE);
+        }
     }
 
     // ===== SEARCH BAR =====
