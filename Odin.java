@@ -1675,7 +1675,7 @@ public class Odin {
 
     // ===== ADD or UPDATE ENTRY =====
     private void addUpdateEntry(String mode) {
-        System.out.println(mode);
+        if (DEBUG) System.out.println(mode);
         if (mode.equals("update")) {
             int row = table.getSelectedRow();
             if (row == -1) return;
