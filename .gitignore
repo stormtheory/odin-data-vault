@@ -1,7 +1,5 @@
-bin/*
-bin/fatjar
-bin/JavaPasswordVault.jar
-JavaPasswordVault.jar
-OdinDataVault.jar
+bin
+*.jar
 fatjar
 vault.db
+runes.db

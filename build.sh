@@ -101,6 +101,7 @@ ZIP_UP() {
 }
 
 JAR(){
+    mkdir -p ./bin
     # ===== Clean old build =====
     rm -f bin/* $JAR_FILENAME
     rm -rf fatjar
@@ -131,14 +132,14 @@ JAR(){
 }
 
 BUILD() {
-        rm -f ./bin/*
-        echo "javac -cp \".:lib/$SQLITE_LIB:lib/$ARGON2_LIB:lib/$ARGON2_NOLIB:lib/$BOUNCY_HOUSE_LIB:lib/$JNA_LIB:lib/$PDF_LIB:lib/$JSON_LIB:bin\" -d bin *.java"
+        rm -f ./bin
+        echo "javac -cp \".:lib/$SQLITE_LIB:lib/$ARGON2_LIB:lib/$ARGON2_NOLIB:lib/$BOUNCY_HOUSE_LIB:lib/$JNA_LIB:lib/$PDF_LIB:lib/$JSON_LIB:bin\" -d bin java/*.java"
         
         if [ "$DEBUG" != true ];then
-          javac -cp ".:lib/$SQLITE_LIB:lib/$ARGON2_LIB:lib/$ARGON2_NOLIB:lib/$BOUNCY_HOUSE_LIB:lib/$JNA_LIB:lib/$PDF_LIB:lib/$JSON_LIB:bin" -d bin *.java
+          javac -cp ".:lib/$SQLITE_LIB:lib/$ARGON2_LIB:lib/$ARGON2_NOLIB:lib/$BOUNCY_HOUSE_LIB:lib/$JNA_LIB:lib/$PDF_LIB:lib/$JSON_LIB:bin" -d bin java/*.java
         else
-          javac -Xlint:deprecation -cp ".:lib/$SQLITE_LIB:lib/$ARGON2_LIB:lib/$ARGON2_NOLIB:lib/$BOUNCY_HOUSE_LIB:lib/$JNA_LIB:lib/$PDF_LIB:lib/$JSON_LIB:bin" -d bin *.java
-          #javac -Xlint:deprecation -cp ".:lib/*:bin" -d bin *.java
+          javac -Xlint:deprecation -cp ".:lib/$SQLITE_LIB:lib/$ARGON2_LIB:lib/$ARGON2_NOLIB:lib/$BOUNCY_HOUSE_LIB:lib/$JNA_LIB:lib/$PDF_LIB:lib/$JSON_LIB:bin" -d bin java/*.java
+          #javac -Xlint:deprecation -cp ".:lib/*:bin" -d bin java/*.java
         
         fi
 }
@@ -214,8 +215,8 @@ done
 
 if [ "$Clean" == true ];then
   echo "Cleaning..."
-  rm -rf bin/*
-  rm -f JavaPasswordVault.jar
+  rm -rf ./bin
+  rm -f *.jar
   rm -rf fatjar
   rm -f vault.db
 fi
