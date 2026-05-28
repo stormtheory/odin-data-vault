@@ -155,7 +155,7 @@ No external database or installer required, unless you want it.
 **[ New Features ]**
 - [X] Multiple item delete
 - [X] "folders"
-- [-] Trashcan - deleted items lands here.
+- [X] Trashcan - deleted items lands here.
 - [ ] Passphrase Generator
 - [ ] "totp":
 
