@@ -143,6 +143,7 @@ public class ImportExport {
     private static final int ODIN_SSH      = 13;
     private static final int ODIN_PASSKEY  = 14;
     private static final int ODIN_VPN      = 15;
+    private static final int ODIN_FOLDERS  = 16;
 
     // ===== DEPENDENCIES =====
     private final Yggdrasil  backend;

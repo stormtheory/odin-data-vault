@@ -72,6 +72,9 @@ public class Odin {
 // ===== SIDEBAR FILTER =====
     private String currentTypeFilter = "account"; // ===== Default to accounts view =====
 
+// ===== TOOLBAR BUTTONS - fields so refreshTable can update labels =====
+    private JButton delBtn = null;
+
 // ===== DETAIL PANEL =====
     private JPanel detailPanel;
     private JPanel detailContent;
@@ -492,7 +495,8 @@ public class Odin {
     // ===== Moves all credentials to Unsorted, then removes the folder. =====
     private void deleteFolderWithConfirmation() {
         if (currentFolderFilter == null) return;
-        if (Futhark.DEFAULT_FOLDER_ID.equals(currentFolderFilter)) return; // ===== Guard: Unsorted is undeletable =====
+        if (Futhark.DEFAULT_FOLDER_ID.equals(currentFolderFilter)) return;
+        if (Futhark.TRASH_FOLDER_ID.equals(currentFolderFilter))   return; // ===== Trash is undeletable =====
 
         // ===== Find folder name for the confirmation message =====
         String folderName = "this folder";
@@ -534,6 +538,7 @@ public class Odin {
     private void renameFolderDialog() {
         if (currentFolderFilter == null) return;
         if (Futhark.DEFAULT_FOLDER_ID.equals(currentFolderFilter)) return;
+        if (Futhark.TRASH_FOLDER_ID.equals(currentFolderFilter))   return; // ===== Trash is not renameable =====
 
         // ===== Find the current folder name to pre-fill =====
         String currentName = "";
@@ -686,10 +691,13 @@ public class Odin {
         sidebar.add(folderHeader);
         sidebar.add(Box.createVerticalStrut(2));
 
+        // ===== TRASH - fixed sentinel entry, always present, not part of folder list =====
+        sidebar.add(buildTrashSidebarButton(sidebar));
+        sidebar.add(Box.createVerticalStrut(2));
+
         // ===== FOLDER BUTTONS go directly into sidebar - no intermediate panel =====
-        // ===== Intermediate BoxLayout panel breaks width constraints; direct children work =====
-        sidebarFolderListPanel = sidebar; // ===== Point to sidebar itself for rebuildFolderListPanel =====
-        sidebarFolderInsertIndex = sidebar.getComponentCount(); // ===== Remember insert position =====
+        sidebarFolderListPanel    = sidebar;
+        sidebarFolderInsertIndex  = sidebar.getComponentCount();
 
         // ===== Glue and folder buttons added by rebuildFolderListPanel() =====
         rebuildFolderListPanel();
@@ -764,7 +772,41 @@ public class Odin {
         return header;
     }
 
-    // ===== REBUILD FOLDER LIST PANEL =====
+    // ===== TRASH SIDEBAR BUTTON =====
+    // ===== Fixed entry - always present, never deleteable or renameable. =====
+    // ===== Uses the recycling symbol icon. =====
+    private JPanel buildTrashSidebarButton(JPanel sidebar) {
+        JPanel btn = new JPanel(new BorderLayout(6, 0));
+        btn.setBackground(ThemeManager.SURFACE);
+        btn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 38));
+        btn.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 8));
+        btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        JLabel iconLbl = new JLabel(SidebarIcon.forType("trash", 16));
+        iconLbl.setPreferredSize(new Dimension(24, 24));
+
+        JLabel textLbl = new JLabel("Trash");
+        textLbl.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        textLbl.setForeground(ThemeManager.TEXT_MUTED);
+        sidebarAllLabels.add(textLbl);
+
+        btn.add(iconLbl, BorderLayout.WEST);
+        btn.add(textLbl, BorderLayout.CENTER);
+
+        btn.addMouseListener(new MouseAdapter() {
+            public void mouseClicked(MouseEvent e) {
+                currentFolderFilter = Futhark.TRASH_FOLDER_ID;
+                // ===== Trash is a sentinel - no rename or folder-delete buttons =====
+                if (trashFolderBtn  != null) trashFolderBtn.setVisible(false);
+                if (renameFolderBtn != null) renameFolderBtn.setVisible(false);
+                clearSidebarSelections(sidebar);
+                btn.setBackground(ThemeManager.SELECT);
+                refreshTable();
+            }
+        });
+
+        return btn;
+    }
     // ===== Called at startup and after any folder add/delete. =====
     // ===== Clears the panel and repopulates from the current folders list. =====
     private void rebuildFolderListPanel() {
@@ -917,7 +959,7 @@ public class Odin {
         panel.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, ThemeManager.BORDER));
 
         JButton addBtn     = new JButton("＋ Add Secret");
-        JButton delBtn     = new JButton("🗑 Delete Selected");
+        delBtn             = new JButton("🗑 Move to Trash");
         JButton updateBtn  = new JButton("Update");
         JButton accountBtn = new JButton("🔐 Account: " + username);
 
@@ -1429,14 +1471,16 @@ public class Odin {
     // ===== Returns true if the credential should appear given the current =====
     // ===== folder filter or type filter, whichever is active. =====
     private boolean passesActiveFilter(Yggdrasil.Credential c) {
+        String credFolder = (c.folderId == null || c.folderId.isBlank())
+            ? Futhark.DEFAULT_FOLDER_ID
+            : c.folderId;
+
         if (currentFolderFilter != null) {
-            // ===== Folder mode: match folderId, show all types =====
-            String credFolder = (c.folderId == null || c.folderId.isBlank())
-                ? Futhark.DEFAULT_FOLDER_ID
-                : c.folderId;
+            // ===== Folder mode: match folderId exactly =====
             return credFolder.equals(currentFolderFilter);
         } else {
-            // ===== Type mode: match entry type =====
+            // ===== Type mode: match entry type AND exclude trash =====
+            if (Futhark.TRASH_FOLDER_ID.equals(credFolder)) return false;
             return currentTypeFilter.equals(c.type);
         }
     }
@@ -1552,6 +1596,12 @@ public class Odin {
             : Futhark.forKey(currentTypeFilter);
 
         if (DEBUG) System.out.println("refreshTable()  typeFilter=" + currentTypeFilter + "  folderFilter=" + currentFolderFilter);
+
+        // ===== Update delete button label based on context =====
+        if (delBtn != null) {
+            boolean inTrash = Futhark.TRASH_FOLDER_ID.equals(currentFolderFilter);
+            delBtn.setText(inTrash ? "🗑 Delete Permanently" : "🗑 Move to Trash");
+        }
 
         // ===== Clear search when switching categories =====
         currentSearchQuery = "";
@@ -1689,9 +1739,11 @@ public class Odin {
 
         for (int fi = 0; fi < folders.size(); fi++) {
             Yggdrasil.Folder f = folders.get(fi);
+            // ===== Trash is not a valid assignment target - skip it =====
+            if (Futhark.TRASH_FOLDER_ID.equals(f.folderId)) continue;
             folderBox.addItem(f.name != null ? new String(f.name) : "Unnamed");
             folderIdList.add(f.folderId);
-            if (f.folderId.equals(credExistingFolderId)) folderPreSelectIdx = fi;
+            if (f.folderId.equals(credExistingFolderId)) folderPreSelectIdx = folderIdList.size() - 1;
         }
         if (!folderIdList.isEmpty()) folderBox.setSelectedIndex(folderPreSelectIdx);
         folderBox.setBackground(ThemeManager.SURFACE2);
@@ -2192,44 +2244,51 @@ public class Odin {
     }
 
     // ===== DELETE ENTRY =====
+    // ===== If viewing Trash: permanently delete from DB. =====
+    // ===== Otherwise: move to Trash folder. =====
     private void deleteEntry() {
-        // ===== GET ALL SELECTED ROW INDICES =====
         int[] rows = table.getSelectedRows();
-
         if (rows.length == 0) return;
 
-        // ===== CONFIRM DELETION - show count so user knows scope =====
-        int confirm = ThemeManager.showThemedConfirm(mainFrame,
-            "Delete " + rows.length + " selected entr" + (rows.length == 1 ? "y" : "ies") + "?",
-            "Confirm Delete");
+        boolean inTrash = Futhark.TRASH_FOLDER_ID.equals(currentFolderFilter);
+        String  count   = rows.length + " secret" + (rows.length == 1 ? "" : "s");
 
-        if (confirm == JOptionPane.YES_OPTION) {
-            try {
-                // ===== COLLECT IDs BEFORE DELETION =====
-                // ===== Sort descending so removal from bottom up doesn't affect upper indices =====
-                int[] sortedRows = rows.clone();
-                java.util.Arrays.sort(sortedRows);
+        // ===== Confirmation message differs based on context =====
+        String msg = inTrash
+            ? "Permanently delete " + count + "?\nThis cannot be undone."
+            : "Move " + count + " to Trash?";
+        String title = inTrash ? "Confirm Permanent Delete" : "Move to Trash";
 
-                // ===== DELETE EACH SELECTED ENTRY BY ID =====
-                for (int i = sortedRows.length - 1; i >= 0; i--) {
-                    int id = (int) model.getValueAt(sortedRows[i], 0);
+        int confirm = ThemeManager.showThemedConfirm(mainFrame, msg, title);
+        if (confirm != JOptionPane.YES_OPTION) return;
+
+        try {
+            int[] sortedRows = rows.clone();
+            java.util.Arrays.sort(sortedRows);
+
+            for (int i = sortedRows.length - 1; i >= 0; i--) {
+                int id = (int) model.getValueAt(sortedRows[i], 0);
+                if (inTrash) {
+                    // ===== Permanently remove from DB =====
                     databaseutilities.deleteEntry(conn, id);
+                } else {
+                    // ===== Move to Trash - re-encrypts folderId only, same IV =====
+                    backend.moveToTrash(conn, id);
                 }
-
-                // ===== RELOAD STATE AFTER ALL DELETES =====
-                credentials = backend.loadAll(conn);
-                refreshTable();
-
-                // ===== CLEAR DETAIL PANEL AFTER DELETE =====
-                detailContent.removeAll();
-                detailContent.revalidate();
-                detailContent.repaint();
-
-                ToastManager.info(mainFrame, rows.length + " entr" + (rows.length == 1 ? "y" : "ies") + " deleted.");
-            } catch (Exception e) {
-                e.printStackTrace();
-                ToastManager.error(mainFrame, "Failed to delete entries.");
             }
+
+            credentials = backend.loadAll(conn);
+            refreshTable();
+
+            detailContent.removeAll();
+            detailContent.revalidate();
+            detailContent.repaint();
+
+            String action = inTrash ? "permanently deleted" : "moved to Trash";
+            ToastManager.info(mainFrame, count + " " + action + ".");
+        } catch (Exception e) {
+            e.printStackTrace();
+            ToastManager.error(mainFrame, "Failed to delete.");
         }
     }
 

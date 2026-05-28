@@ -19,6 +19,7 @@ import javax.swing.*;
  *   binary    - binary digit grid (0/1 pattern) with bracket framing
  *   docs      - note page variant (reuses paintNote)
  *   folder    - classic folder shape with tab, open-top body, highlight
+ *   trash     - recycling symbol (three curved arrows forming a triangle)
  *
  * All icons use ThemeManager.ACCENT as the primary color so they
  * automatically adapt when the theme changes between dark and light.
@@ -29,8 +30,8 @@ import javax.swing.*;
 public class SidebarIcon implements Icon {
 
     // ===== ICON TYPE =====
-    // ===== BINARY and FOLDER are new additions - BINARY now has its own painter =====
-    public enum Type { ACCOUNT, NOTE, ADDRESS, CARD, PASSKEY, SSH, VPN, BINARY, DOCUMENTS, FOLDER }
+    // ===== BINARY, FOLDER and TRASH are additions - BINARY has its own painter =====
+    public enum Type { ACCOUNT, NOTE, ADDRESS, CARD, PASSKEY, SSH, VPN, BINARY, DOCUMENTS, FOLDER, TRASH }
 
     private final Type type;
     private final int  size; // rendered square size in pixels
@@ -63,6 +64,8 @@ public class SidebarIcon implements Icon {
             case "docs"    -> new SidebarIcon(Type.DOCUMENTS, size);
             // ===== FOLDER - used for sidebar folder entries =====
             case "folder"  -> new SidebarIcon(Type.FOLDER,   size);
+            // ===== TRASH - recycling bin for the Trash sentinel folder =====
+            case "trash"   -> new SidebarIcon(Type.TRASH,    size);
             // ===== Fallback - should never hit with current entry types =====
             default        -> new SidebarIcon(Type.ACCOUNT,   size);
         };
@@ -95,6 +98,8 @@ public class SidebarIcon implements Icon {
             case DOCUMENTS -> paintNote(g2);
             // ===== FOLDER routes to its own dedicated painter =====
             case FOLDER    -> paintFolder(g2);
+            // ===== TRASH - recycling symbol =====
+            case TRASH     -> paintTrash(g2);
         }
         g2.dispose();
     }
@@ -569,5 +574,44 @@ public class SidebarIcon implements Icon {
         // ===== Specular glint on tab top-left corner =====
         g2.setColor(new Color(255, 255, 255, 40));
         g2.fill(new Ellipse2D.Float(tX + fR * 0.5f, tY + fR * 0.4f, s * 0.08f, s * 0.05f));
+    }
+
+    // ===== TRASH - recycling symbol =====
+    // ===== Three curved arrows arranged in a triangle, each with an arrowhead. =====
+    // ===== Drawn as three arcs rotated 120 degrees apart. =====
+    private void paintTrash(Graphics2D g2) {
+        float s  = size;
+        float cx = s * 0.50f;
+        float cy = s * 0.52f;
+        float r  = s * 0.34f; // radius of the arrow circle path
+
+        g2.setColor(acA(210));
+        g2.setStroke(new BasicStroke(s * 0.10f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+
+        // ===== Three arcs at 0, 120, 240 degrees =====
+        // ===== Each arc spans ~100 degrees leaving a gap for the arrowhead =====
+        for (int i = 0; i < 3; i++) {
+            double startDeg = i * 120.0 + 10.0; // ===== offset so gap faces outward =====
+            g2.draw(new Arc2D.Double(
+                cx - r, cy - r, r * 2, r * 2,
+                startDeg, 90, Arc2D.OPEN));
+
+            // ===== Arrowhead at end of each arc =====
+            double endRad  = Math.toRadians(startDeg + 90);
+            float  ax      = (float)(cx + r * Math.cos(endRad));
+            float  ay      = (float)(cy - r * Math.sin(endRad));
+            // ===== Tangent direction at arc end - perpendicular to radius =====
+            double tanRad  = endRad + Math.PI / 2.0;
+            float  headLen = s * 0.12f;
+            float  hx1     = ax + (float)(Math.cos(tanRad + 0.5) * headLen);
+            float  hy1     = ay - (float)(Math.sin(tanRad + 0.5) * headLen);
+            float  hx2     = ax + (float)(Math.cos(tanRad - 0.5) * headLen);
+            float  hy2     = ay - (float)(Math.sin(tanRad - 0.5) * headLen);
+
+            g2.setStroke(new BasicStroke(s * 0.08f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g2.draw(new Line2D.Float(hx1, hy1, ax, ay));
+            g2.draw(new Line2D.Float(hx2, hy2, ax, ay));
+            g2.setStroke(new BasicStroke(s * 0.10f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        }
     }
 }

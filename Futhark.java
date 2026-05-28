@@ -71,6 +71,7 @@ public class Futhark {
         }
     }
     public static final String DEFAULT_FOLDER_ID = "2245";
+    public static final String TRASH_FOLDER_ID = "trash";
 
     // ===== REGISTERED TYPES =====
     // Ordered - this order controls sidebar display order

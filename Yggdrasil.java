@@ -801,14 +801,41 @@ public class Yggdrasil {
         // Instant.now() captures current UTC time; toString() formats to ISO-8601 with 'Z' suffix
         return Instant.now().toString();
     }
-// ===== FOLDER DATA CLASS =====
-// ===== One Folder instance per row in the folders table. =====
-// ===== name and desc are decrypted at vault open; folderId is a UUID string. =====
-// ===== This class is defined as a static nested class inside Yggdrasil. =====
+// ===== MOVE CREDENTIAL TO TRASH =====
+    // ===== Re-encrypts only the folderId field using the EXISTING row IV. =====
+    // ===== Using the same IV is intentional - all other fields stay intact. =====
+    // ===== A fresh IV would require re-encrypting every field in the row. =====
+    protected void moveToTrash(Connection conn, int id) throws Exception {
+        // ===== Fetch the existing IV and current folderId for this row =====
+        String selectSql = "SELECT iv FROM vault WHERE id = ?";
+        byte[] iv;
+        try (PreparedStatement sel = conn.prepareStatement(selectSql)) {
+            sel.setInt(1, id);
+            try (ResultSet rs = sel.executeQuery()) {
+                if (!rs.next()) throw new IllegalStateException("Credential not found: " + id);
+                iv = rs.getBytes("iv");
+            }
+        }
 
-// NOTE: Add this static nested class inside Yggdrasil.java, alongside Credential.
-// Place it immediately after the closing brace of the Credential class.
+        // ===== Encrypt the trash folderId with the existing IV =====
+        byte[] encTrashId = encryptData(
+            Futhark.TRASH_FOLDER_ID.toCharArray(), iv, Vault_Use_Key);
 
+        // ===== Update only the folderId column - all other columns unchanged =====
+        String updateSql = "UPDATE vault SET folderId = ? WHERE id = ?";
+        try (PreparedStatement upd = conn.prepareStatement(updateSql)) {
+            upd.setBytes(1, encTrashId);
+            upd.setInt(2,   id);
+            upd.executeUpdate();
+        }
+
+        wipeByteArray(encTrashId);
+        if (DEBUG) System.out.println("Moved to trash: " + id);
+    }
+
+    // ===== FOLDER DATA CLASS =====
+    // ===== One Folder instance per row in the folders table. =====
+    // ===== name and desc are decrypted at vault open; folderId is a UUID string. =====
     protected static class Folder {
         protected int    id;           // SQLite auto-increment row id
         protected String folderId;     // UUID string - the logical identifier used in vault rows
@@ -827,10 +854,6 @@ public class Yggdrasil {
         }
     }
 
-// ===========================================================================================
-// ===== FOLDER METHODS - add these inside the Yggdrasil class body =====
-// ===========================================================================================
-
     // ===== LOAD ALL FOLDERS FROM DB =====
     // ===== Decrypts name and desc at load time - needed for sidebar and combo box display. =====
     // ===== Always injects the synthetic Unsorted sentinel at position 0. =====
@@ -839,38 +862,38 @@ public class Yggdrasil {
         List<Folder> result = new ArrayList<>();
 
         // ===== INJECT UNSORTED SENTINEL - always first, never deleteable =====
-        Folder unsorted = new Folder();
-        unsorted.id       = -1; // ===== Synthetic row - no real DB id =====
+        Folder unsorted   = new Folder();
+        unsorted.id       = -1;
         unsorted.folderId = Futhark.DEFAULT_FOLDER_ID;
         unsorted.name     = "Unsorted".toCharArray();
         unsorted.desc     = new char[0];
-        unsorted.iv       = null; // ===== No IV needed - sentinel is not encrypted =====
+        unsorted.iv       = null;
         result.add(unsorted);
+
+        // ===== INJECT TRASH SENTINEL - always second, never deleteable or renameable =====
+        Folder trash   = new Folder();
+        trash.id       = -2;
+        trash.folderId = Futhark.TRASH_FOLDER_ID;
+        trash.name     = "Trash".toCharArray();
+        trash.desc     = new char[0];
+        trash.iv       = null;
+        result.add(trash);
 
         // ===== LOAD REAL FOLDERS FROM DB =====
         String sql = "SELECT id, folderId, name, desc, iv FROM folders ORDER BY id ASC";
         try (PreparedStatement stmt = conn.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
             while (rs.next()) {
-                Folder f  = new Folder();
+                Folder f   = new Folder();
                 f.id       = rs.getInt("id");
                 f.iv       = rs.getBytes("iv");
                 // ===== folderId is stored as plain TEXT - it is a UUID, not sensitive =====
-                // ===== We treat it as an opaque identifier, not a secret =====
                 f.folderId = rs.getString("folderId");
                 // ===== name and desc are encrypted BLOBs - decrypt now =====
                 byte[] encName = rs.getBytes("name");
                 byte[] encDesc = rs.getBytes("desc");
-                if (encName != null) {
-                    f.name = decryptData(encName, f.iv);
-                } else {
-                    f.name = new char[0];
-                }
-                if (encDesc != null) {
-                    f.desc = decryptData(encDesc, f.iv);
-                } else {
-                    f.desc = new char[0];
-                }
+                f.name = (encName != null) ? decryptData(encName, f.iv) : new char[0];
+                f.desc = (encDesc != null) ? decryptData(encDesc, f.iv) : new char[0];
                 result.add(f);
             }
         }
@@ -881,8 +904,8 @@ public class Yggdrasil {
     // ===== Re-encrypts the name field with a fresh IV, keeps desc unchanged. =====
     protected void renameFolderInDb(Connection conn, String folderId,
                                      char[] newName, char[] desc) throws Exception {
-        byte[] iv      = generateIV();
-        byte[] encName = encryptData(newName, iv, Vault_Use_Key);
+        byte[] iv       = generateIV();
+        byte[] encName  = encryptData(newName, iv, Vault_Use_Key);
         char[] safeDesc = (desc != null && desc.length > 0) ? desc : new char[]{ ' ' };
         byte[] encDesc  = encryptData(safeDesc, iv, Vault_Use_Key);
 
@@ -894,7 +917,6 @@ public class Yggdrasil {
             stmt.setString(4, folderId);
             stmt.executeUpdate();
         }
-
         wipeByteArray(encName);
         wipeByteArray(encDesc);
         wipeByteArray(iv);
@@ -905,13 +927,13 @@ public class Yggdrasil {
     // ===== Generates a UUID for folderId, encrypts name and desc, inserts into folders table. =====
     // ===== Returns the generated folderId so the caller can reference it immediately. =====
     protected String addFolder(Connection conn, char[] name, char[] desc) throws Exception {
-        byte[] iv         = generateIV();
+        byte[] iv       = generateIV();
         // ===== UUID is the logical key used in vault rows - not sensitive, stored as TEXT =====
-        String folderId   = GenUUID.generateAsString();
-        byte[] encName    = encryptData(name, iv, Vault_Use_Key);
+        String folderId = GenUUID.generateAsString();
+        byte[] encName  = encryptData(name, iv, Vault_Use_Key);
         // ===== desc may be empty - encrypt a space rather than null to keep schema consistent =====
-        char[] safeDesc   = (desc != null && desc.length > 0) ? desc : new char[]{' '};
-        byte[] encDesc    = encryptData(safeDesc, iv, Vault_Use_Key);
+        char[] safeDesc = (desc != null && desc.length > 0) ? desc : new char[]{ ' ' };
+        byte[] encDesc  = encryptData(safeDesc, iv, Vault_Use_Key);
 
         String sql = "INSERT INTO folders(folderId, name, desc, iv) VALUES(?, ?, ?, ?)";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -921,14 +943,12 @@ public class Yggdrasil {
             stmt.setBytes(4,  iv);
             stmt.executeUpdate();
         }
-
         // ===== Wipe temporary byte arrays immediately after write =====
         wipeByteArray(encName);
         wipeByteArray(encDesc);
         wipeByteArray(iv);
         wipeCharArray(name);
         if (desc != null) wipeCharArray(desc);
-
         return folderId;
     }
 
@@ -936,33 +956,29 @@ public class Yggdrasil {
     // ===== Reassigns all credentials in the folder to Unsorted (DEFAULT_FOLDER_ID), =====
     // ===== then deletes the folder row. Each reassigned credential gets a fresh IV =====
     // ===== since the folderId field is part of the encrypted row. =====
-    // ===== The Unsorted sentinel (folderId == Futhark.DEFAULT_FOLDER_ID) =====
-    // ===== cannot be passed here - caller must guard against it. =====
     protected void deleteFolder(Connection conn, String folderId) throws Exception {
         if (Futhark.DEFAULT_FOLDER_ID.equals(folderId)) {
             // ===== Safety guard - Unsorted is a sentinel, never a real DB row =====
             throw new IllegalArgumentException("Cannot delete the Unsorted sentinel folder.");
         }
 
-        // ===== FIND ALL CREDENTIALS IN THIS FOLDER =====
-        // ===== We need to re-encrypt each row since folderId is stored encrypted. =====
-        // ===== Load all rows, check decrypted folderId, reassign matching ones. =====
+        // ===== FIND ALL CREDENTIALS IN THIS FOLDER AND REASSIGN TO UNSORTED =====
         String selectSql = "SELECT id, folderId, tag, type, data0, data1, data2, data3, data4, " +
                            "data5, data6, data7, data8, creationDate, revisionDate, iv FROM vault";
         try (PreparedStatement sel = conn.prepareStatement(selectSql);
              ResultSet rs = sel.executeQuery()) {
             while (rs.next()) {
-                byte[] rowIV       = rs.getBytes("iv");
-                char[] rowFolderId = decryptData(rs.getBytes("folderId"), rowIV);
+                byte[] rowIV          = rs.getBytes("iv");
+                char[] rowFolderId    = decryptData(rs.getBytes("folderId"), rowIV);
                 String rowFolderIdStr = new String(rowFolderId);
                 wipeCharArray(rowFolderId);
 
                 if (!rowFolderIdStr.equals(folderId)) continue; // ===== Not in this folder =====
 
-                // ===== RE-ENCRYPT THE ROW with a fresh IV and the default folderId =====
+                // ===== RE-ENCRYPT ROW with fresh IV and default folderId =====
                 byte[] newIV        = generateIV();
-                byte[] encTag       = encryptData(decryptData(rs.getBytes("tag"),       rowIV), newIV, Vault_Use_Key);
-                byte[] encType      = encryptData(decryptData(rs.getBytes("type"),      rowIV), newIV, Vault_Use_Key);
+                byte[] encTag       = encryptData(decryptData(rs.getBytes("tag"),          rowIV), newIV, Vault_Use_Key);
+                byte[] encType      = encryptData(decryptData(rs.getBytes("type"),         rowIV), newIV, Vault_Use_Key);
                 byte[] encFolderDef = encryptData(Futhark.DEFAULT_FOLDER_ID.toCharArray(), newIV, Vault_Use_Key);
                 byte[] encCD        = encryptData(decryptData(rs.getBytes("creationDate"), rowIV), newIV, Vault_Use_Key);
                 byte[] encRD        = encryptData(timeCheck_UTC_time().toCharArray(),      newIV, Vault_Use_Key);
@@ -970,9 +986,7 @@ public class Yggdrasil {
                 byte[][] encData = new byte[9][];
                 for (int i = 0; i < Futhark.DATA_COLUMNS.length; i++) {
                     byte[] raw = rs.getBytes(Futhark.DATA_COLUMNS[i]);
-                    if (raw != null) {
-                        encData[i] = encryptData(decryptData(raw, rowIV), newIV, Vault_Use_Key);
-                    }
+                    if (raw != null) encData[i] = encryptData(decryptData(raw, rowIV), newIV, Vault_Use_Key);
                 }
 
                 String updateSql = "UPDATE vault SET tag=?, data0=?, data1=?, data2=?, data3=?, " +
@@ -989,7 +1003,6 @@ public class Yggdrasil {
                     upd.setInt(16,   rs.getInt("id"));
                     upd.executeUpdate();
                 }
-
                 // ===== Wipe all temporary arrays for this row =====
                 wipeByteArray(newIV);
                 wipeByteArray(encTag);
@@ -1007,7 +1020,6 @@ public class Yggdrasil {
             del.setString(1, folderId);
             del.executeUpdate();
         }
-
         if (DEBUG) System.out.println("Folder deleted and credentials moved to Unsorted: " + folderId);
     }
 }
