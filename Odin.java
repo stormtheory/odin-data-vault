@@ -29,8 +29,8 @@ public class Odin {
 // ===== FOLDER FILTER =====
     // ===== null = no folder filter active (type filter is driving) =====
     // ===== non-null = folder UUID or Futhark.DEFAULT_FOLDER_ID (Unsorted) =====
+    private JButton sidebarAddFolderBtn = null;
     private String  currentFolderFilter = null;
-    // ===== Buttons shown in search bar when a folder filter is active =====
     private JButton trashFolderBtn      = null;
     private JButton renameFolderBtn     = null;
 
@@ -44,7 +44,6 @@ public class Odin {
     public ImageIcon                     dialogIcon   = null;
     public ImageIcon                     appIcon      = null;
     public List<Yggdrasil.Credential>    credentials  = new ArrayList<>();
-    // ===== Loaded at vault open alongside credentials - decrypted name/desc =====
     public List<Yggdrasil.Folder>        folders      = new ArrayList<>();
     public Yggdrasil                     backend      = new Yggdrasil();
     public int                           PASSWORD_LENGTH;
@@ -87,18 +86,9 @@ public class Odin {
     // ===== Scroll pane wrapping the sidebar - needed for mouseExited collapse check =====
     private JScrollPane    sidebarScrollPane        = null;
     // ===== Index in sidebar at which folder buttons start - for direct add/remove =====
-    private int            sidebarFolderInsertIndex = 0;
-    // ===== Animation state stored so rebuildFolderListPanel can pass to folder buttons =====
-    private Timer[]        sidebarAnimator          = {null};
-    private int[]          sidebarCurrentWidth      = {44};
-    private int[]          sidebarTargetWidth       = {44};
-    private int            sidebarCollapsedW        = 44;
     private int            sidebarExpandedW         = 190;
-    private int            sidebarAnimStep          = 12;
-    // ===== Holds label refs for the sidebar slide animation =====
+    private int            sidebarFolderInsertIndex = 0;
     private List<JLabel>   sidebarAllLabels         = new ArrayList<>();
-    // ===== The + button in the folder header - shown/hidden with the animation =====
-    private JButton        sidebarAddFolderBtn      = null;
 
 // ======= MAIN ====================
     public static void main(String[] args) throws Exception {
@@ -212,7 +202,7 @@ public class Odin {
 
                 // ===== DOUBLE CLICK - copy field to clipboard =====
                 if (e.getClickCount() == 2) {
-                    if (col == 0) return; // ===== Never copy hidden ID column =====
+                    if (col == 0) return; // Never copy hidden ID column
                     copyFieldToClipboard(credIndex, col);
                 }
             }
@@ -224,7 +214,6 @@ public class Odin {
         table.getColumnModel().getColumn(0).setMinWidth(0);
         table.getColumnModel().getColumn(0).setMaxWidth(0);
 
-        // ===== TYPE COLUMN - visible, fixed narrow width =====
         // ===== Shows the entry type as text (e.g. "account", "note") =====
         table.getColumnModel().getColumn(1).setMinWidth(72);
         table.getColumnModel().getColumn(1).setMaxWidth(90);
@@ -267,6 +256,7 @@ public class Odin {
         sidebarScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         sidebarScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         sidebarScrollPane.setBorder(null);
+        sidebarScrollPane.setPreferredSize(new Dimension(200, 0));
         sidebarScrollPane.setViewportBorder(null);
         sidebarScrollPane.getViewport().setBackground(ThemeManager.SURFACE);
         sidebarScrollPane.setBackground(ThemeManager.SURFACE);
@@ -647,7 +637,6 @@ public class Odin {
 
     // ===== SIDEBAR =====
     /**
-     * Fixed-width sidebar. No hover animation - always expanded.
      * Folders section scrollable when overflow occurs.
      */
     private JPanel buildSidebar() {
@@ -691,7 +680,6 @@ public class Odin {
         sidebar.add(folderHeader);
         sidebar.add(Box.createVerticalStrut(2));
 
-        // ===== TRASH - fixed sentinel entry, always present, not part of folder list =====
         sidebar.add(buildTrashSidebarButton(sidebar));
         sidebar.add(Box.createVerticalStrut(2));
 
@@ -773,8 +761,6 @@ public class Odin {
     }
 
     // ===== TRASH SIDEBAR BUTTON =====
-    // ===== Fixed entry - always present, never deleteable or renameable. =====
-    // ===== Uses the recycling symbol icon. =====
     private JPanel buildTrashSidebarButton(JPanel sidebar) {
         JPanel btn = new JPanel(new BorderLayout(6, 0));
         btn.setBackground(ThemeManager.SURFACE);
@@ -821,7 +807,6 @@ public class Odin {
             sidebar.remove(i);
         }
 
-        // ===== Trim folder labels from animation list - keep only fixed entries =====
         // ===== 9 type labels + 1 FOLDERS header label = 10 fixed entries =====
         int fixedLabelCount = 10;
         while (sidebarAllLabels.size() > fixedLabelCount) {
@@ -830,6 +815,7 @@ public class Odin {
 
         // ===== ADD folder buttons directly to sidebar =====
         for (Yggdrasil.Folder folder : folders) {
+            if (Futhark.TRASH_FOLDER_ID.equals(folder.folderId)) continue;
             JPanel folderBtn = buildFolderButton(folder, sidebar);
             sidebar.add(folderBtn);
             sidebar.add(Box.createVerticalStrut(2));
@@ -1003,6 +989,7 @@ public class Odin {
                     credentials.clear();
                     credentials.addAll(backend.loadAll(conn));
                     refreshTable();
+                    rebuildFolderListPanel();
                 } catch (Exception ex) {
                     ex.printStackTrace();
                     ToastManager.error(mainFrame, "Failed to reload after import.");
@@ -1143,7 +1130,7 @@ public class Odin {
                 return f.name != null ? new String(f.name) : "Unnamed";
             }
         }
-        return "Unsorted"; // ===== Fallback if folder was deleted =====
+        return "Unsorted";
     }
 
     /** Adds a plain (non-sensitive) field row to the detail panel. */

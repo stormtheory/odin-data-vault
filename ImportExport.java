@@ -110,6 +110,30 @@ import de.mkammerer.argon2.Argon2Factory.Argon2Types;
  *   IV/Nonce    : 12 bytes (96-bit, NIST SP 800-38D recommended)
  *   Auth tag    : 128-bit (maximum GCM tag size)
  *   CipherString: "3.{iv_b64}|{ct_with_tag_b64}"
+ *
+ * =========================================================================
+ * ===== FOLDER EXPORT / IMPORT =====
+ * =========================================================================
+ *
+ * Folders are exported as a flat array in the inner JSON alongside items,
+ * matching Bitwarden's format exactly:
+ *   "folders": [ { "id": "uuid", "name": "Work" }, ... ]
+ *
+ * Sentinel folders (Unsorted, Trash) are skipped on export and recreated
+ * automatically by the vault on startup - they are never written to the file.
+ *
+ * On import, a remap table is built first:
+ *   - If a folder with the same name already exists locally, the exported
+ *     folderId is remapped to the existing local folder (no duplicate created).
+ *   - If the folder is new, backend.addFolder() creates it and the new UUID
+ *     is recorded in the remap table.
+ *   - Items are then written with the remapped local folderId.
+ *   - Items whose folderId is null, blank, or not found in the remap table
+ *     fall back to DEFAULT_FOLDER_ID (Unsorted).
+ *
+ * REQUIREMENT: backend.addFolder() must return the new folder's UUID String.
+ * If your Yggdrasil.addFolder() currently returns void, change it to return
+ * the generated UUID before inserting so the remap table can be populated.
  */
 public class ImportExport {
 
@@ -137,6 +161,7 @@ public class ImportExport {
     private static final int BW_CARD     = 3;
     private static final int BW_IDENTITY = 4;
 
+    // ===== ODIN EXTENDED TYPE INTEGERS (above BW range to avoid collision) =====
     private static final int ODIN_NOTES    = 10;
     private static final int ODIN_DOCS     = 11;
     private static final int ODIN_BINARY   = 12;
@@ -353,13 +378,13 @@ public class ImportExport {
             isRamImport = op == Operation.IMPORT_BITWARDEN_RAM;
             isExport    = op == Operation.EXPORT_ODIN || op == Operation.EXPORT_BITWARDEN;
 
-            // RAM disk import needs no file or password - the importer handles both
+            // ===== RAM disk import needs no file or password - the importer handles both =====
             fileLabel.setVisible(!isRamImport);
             fileRow.setVisible(!isRamImport);
             passLabel.setVisible(!isRamImport);
             passField.setVisible(!isRamImport);
 
-            // Strength bar and confirm only shown for export operations
+            // ===== Strength bar and confirm only shown for export operations =====
             strengthBar.setVisible(isExport);
             confirmLabel.setVisible(isExport);
             confirmField.setVisible(isExport);
@@ -368,40 +393,37 @@ public class ImportExport {
 
             infoLabel.setForeground(ThemeManager.TEXT_MUTED);
             infoLabel.setText(switch (op) {
-                case EXPORT_ODIN          -> "Argon2id + AES-256-GCM encrypted. Profile: " + vaultLevel; 
+                case EXPORT_ODIN          -> "Argon2id + AES-256-GCM encrypted. Profile: " + vaultLevel;
                 case EXPORT_BITWARDEN     -> "PBKDF2 + AES-256-CBC. Use this password when importing into Bitwarden.";
                 case IMPORT_ODIN          -> "Select your Odin backup .json file then enter its password.";
                 case IMPORT_BITWARDEN_ENC -> "Select your Bitwarden encrypted .json file then enter its password.";
                 case IMPORT_BITWARDEN_RAM -> "File is saved to RAM only and wiped immediately after import.";
             });
 
-            // Define the timestamp format matching: 20260514071740
+            // ===== Timestamp format: 20260514071740 =====
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
             String timestamp = LocalDateTime.now().format(formatter);
 
             switch (op) {
-                case EXPORT_ODIN          -> filename = "odin_encrypted_export_" + timestamp + ".json"; 
-                case EXPORT_BITWARDEN     -> filename = "bitwarden_encrypted_export_" + timestamp + ".json";
-                }
+                case EXPORT_ODIN      -> filename = "odin_encrypted_export_" + timestamp + ".json";
+                case EXPORT_BITWARDEN -> filename = "bitwarden_encrypted_export_" + timestamp + ".json";
+            }
 
             dialog.revalidate();
             dialog.repaint();
         };
 
         opCombo.addActionListener(e -> updateUiForOperation.run());
-        // Run once immediately to set initial state
+        // ===== Run once immediately to set initial UI state =====
         updateUiForOperation.run();
 
         // ===== BROWSE =====
-
         browseBtn.addActionListener(e -> {
             JFileChooser fc = new JFileChooser();
-
             for (Component comp : fc.getComponents()) {
                 ThemeManager.themeFileChooserComponents(comp);
             }
-            
-            if (filename != null && !filename.isEmpty()) {fc.setSelectedFile(new java.io.File(filename));}
+            if (filename != null && !filename.isEmpty()) { fc.setSelectedFile(new java.io.File(filename)); }
             fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("JSON (*.json)", "json"));
             fc.setCurrentDirectory(new File(System.getProperty("user.home") + "/Documents"));
             int result = fc.showDialog(dialog, "Select");
@@ -419,7 +441,7 @@ public class ImportExport {
         // ===== CANCEL =====
         cancelBtn.addActionListener(e -> dialog.dispose());
 
-        // ===== Action Btn ======
+        // ===== ACTION BUTTON - delegates to the selected operation =====
         Runnable actionBtnaction = () -> {
             Operation op = (Operation) opCombo.getSelectedItem();
             infoLabel.setForeground(ThemeManager.TEXT_MUTED);
@@ -427,6 +449,7 @@ public class ImportExport {
             switch (op) {
 
                 // ===== EXPORT ODIN BACKUP =====
+                // ===== Loads folders from DB and includes them in the encrypted inner JSON =====
                 case EXPORT_ODIN -> {
                     char[] pw  = passField.getPassword();
                     char[] pw2 = confirmField.getPassword();
@@ -450,12 +473,15 @@ public class ImportExport {
                     infoLabel.setText("Exporting... (Argon2id key derivation in progress)");
                     new Thread(() -> {
                         try {
-                            String json = exportToJson(credentials, pw, profile);
+                            // ===== Load current folders from DB for inclusion in export =====
+                            List<Yggdrasil.Folder> folders = backend.loadFolders(conn);
+                            String json = exportToJson(credentials, folders, pw, profile);
                             Files.writeString(Path.of(outPath), json, StandardCharsets.UTF_8);
                             Arrays.fill(pw, '\0'); Arrays.fill(pw2, '\0');
                             SwingUtilities.invokeLater(() -> {
                                 dialog.dispose();
-                                ToastManager.show(parent, "Exported " + credentials.size() + " entries to " + outPath,
+                                ToastManager.show(parent,
+                                    "Exported " + credentials.size() + " entries + " + folders.size() + " folders to " + outPath,
                                     ToastManager.ToastType.SUCCESS, 8_000);
                             });
                         } catch (Exception ex) {
@@ -471,6 +497,7 @@ public class ImportExport {
                 }
 
                 // ===== EXPORT BITWARDEN ENCRYPTED JSON =====
+                // ===== Folders included in inner JSON so Bitwarden can reconstruct them =====
                 case EXPORT_BITWARDEN -> {
                     char[] pw  = passField.getPassword();
                     char[] pw2 = confirmField.getPassword();
@@ -494,13 +521,15 @@ public class ImportExport {
                     infoLabel.setText("Exporting... (PBKDF2 key derivation - " + PBKDF2_ITERATIONS + " iterations)");
                     new Thread(() -> {
                         try {
-                            String json = exportToBitwardenEncryptedJson(credentials, pw);
+                            // ===== Load current folders from DB for inclusion in export =====
+                            List<Yggdrasil.Folder> folders = backend.loadFolders(conn);
+                            String json = exportToBitwardenEncryptedJson(credentials, folders, pw);
                             Files.writeString(Path.of(outPath), json, StandardCharsets.UTF_8);
                             Arrays.fill(pw, '\0'); Arrays.fill(pw2, '\0');
                             SwingUtilities.invokeLater(() -> {
                                 dialog.dispose();
                                 ToastManager.show(parent,
-                                    "Exported " + credentials.size() + " entries to " + outPath + " (Bitwarden encrypted format)",
+                                    "Exported " + credentials.size() + " entries + " + folders.size() + " folders to " + outPath + " (Bitwarden encrypted format)",
                                     ToastManager.ToastType.SUCCESS, 8_000);
                             });
                         } catch (Exception ex) {
@@ -533,11 +562,12 @@ public class ImportExport {
                     new Thread(() -> {
                         try {
                             String json  = Files.readString(Path.of(selectedFile[0]), StandardCharsets.UTF_8);
-                            int    count = importFromJson(json, pw);
+                            int[]  counts = importFromJson(json, pw); // ===== [0]=items, [1]=folders =====
                             Arrays.fill(pw, '\0');
                             SwingUtilities.invokeLater(() -> {
                                 dialog.dispose(); onImportComplete.run();
-                                ToastManager.show(parent, "Imported " + count + " entries.",
+                                ToastManager.show(parent,
+                                    "Imported " + counts[0] + " entries and " + counts[1] + " folders.",
                                     ToastManager.ToastType.SUCCESS, 8_000);
                             });
                         } catch (SecurityException sex) {
@@ -560,8 +590,8 @@ public class ImportExport {
                 }
 
                 // ===== IMPORT BITWARDEN ENCRYPTED JSON =====
-                // Uses the same PBKDF2 pipeline as the export but in reverse.
-                // Salt encoding rule applies equally here - see class-level javadoc.
+                // ===== Uses the same PBKDF2 pipeline as the export but in reverse. =====
+                // ===== Salt encoding rule applies equally here - see class-level javadoc. =====
                 case IMPORT_BITWARDEN_ENC -> {
                     char[] pw = passField.getPassword();
                     if (pw.length == 0) {
@@ -578,12 +608,13 @@ public class ImportExport {
                     infoLabel.setText("Importing... (PBKDF2 key derivation in progress)");
                     new Thread(() -> {
                         try {
-                            String json  = Files.readString(Path.of(selectedFile[0]), StandardCharsets.UTF_8);
-                            int    count = importFromBitwardenEncryptedJson(json, pw);
+                            String json   = Files.readString(Path.of(selectedFile[0]), StandardCharsets.UTF_8);
+                            int[]  counts = importFromBitwardenEncryptedJson(json, pw); // ===== [0]=items, [1]=folders =====
                             Arrays.fill(pw, '\0');
                             SwingUtilities.invokeLater(() -> {
                                 dialog.dispose(); onImportComplete.run();
-                                ToastManager.show(parent, "Imported " + count + " entries from Bitwarden.",
+                                ToastManager.show(parent,
+                                    "Imported " + counts[0] + " entries and " + counts[1] + " folders from Bitwarden.",
                                     ToastManager.ToastType.SUCCESS, 8_000);
                             });
                         } catch (SecurityException sex) {
@@ -611,8 +642,8 @@ public class ImportExport {
                     infoLabel.setText("Setting up secure RAM disk...");
                     new Thread(() -> {
                         try {
-                            // RAM disk is acquired, user guided to save export there,
-                            // file read into memory, RAM disk wiped and destroyed
+                            // ===== RAM disk acquired, user guided to save export there, =====
+                            // ===== file read into memory, RAM disk wiped and destroyed =====
                             String json = RamDiskImporter.run(dialog);
                             if (json == null) {
                                 SwingUtilities.invokeLater(() -> {
@@ -621,10 +652,11 @@ public class ImportExport {
                                 });
                                 return;
                             }
-                            int count = importFromBitwardenJson(json);
+                            int[] counts = importFromBitwardenJson(json); // ===== [0]=items, [1]=folders =====
                             SwingUtilities.invokeLater(() -> {
                                 dialog.dispose(); onImportComplete.run();
-                                ToastManager.show(parent, "Imported " + count + " entries from Bitwarden.",
+                                ToastManager.show(parent,
+                                    "Imported " + counts[0] + " entries and " + counts[1] + " folders from Bitwarden.",
                                     ToastManager.ToastType.SUCCESS, 8_000);
                             });
                         } catch (RamDisk.RamDiskException ex) {
@@ -651,13 +683,111 @@ public class ImportExport {
                 }
             }
         };
-        
+
         // ===== ACTION BUTTON - delegates to the selected operation =====
         confirmField.addActionListener(e -> actionBtnaction.run());
         actionBtn.addActionListener(e -> actionBtnaction.run());
-        
+
         dialog.setContentPane(root);
         dialog.setVisible(true);
+    }
+
+    // ===================================================================================================
+    // ===== FOLDER HELPERS
+    // ===================================================================================================
+
+    /**
+     * Builds the folders array for the inner JSON.
+     * Mirrors Bitwarden's format exactly: [ { "id": "uuid", "name": "Work" }, ... ]
+     * Sentinel folders (Unsorted, Trash) are skipped - they are recreated automatically
+     * by the vault on startup and must never appear in an export file.
+     */
+    private JSONArray buildFoldersArray(List<Yggdrasil.Folder> folders) {
+        JSONArray arr = new JSONArray();
+        for (Yggdrasil.Folder f : folders) {
+            // ===== Skip sentinels - never written to export =====
+            if (Futhark.DEFAULT_FOLDER_ID.equals(f.folderId)) continue;
+            if (Futhark.TRASH_FOLDER_ID.equals(f.folderId))   continue;
+
+            JSONObject fo = new JSONObject();
+            fo.put("id",   f.folderId);
+            fo.put("name", f.name != null ? new String(f.name) : "Unnamed");
+            arr.put(fo);
+        }
+        return arr;
+    }
+
+    /**
+     * Imports folders from the inner JSON and returns a folderId remap table.
+     *
+     * Remap logic:
+     *   - If a folder with the same name already exists locally, the exported
+     *     folderId maps to the existing local folder (no duplicate is created).
+     *   - If the folder is new, backend.addFolder() creates it and the returned
+     *     UUID is stored in the remap table.
+     *
+     * REQUIREMENT: backend.addFolder() must return the new folder's UUID String.
+     *
+     * @return Map of exportedFolderId to localFolderId for use when writing items
+     */
+    private Map<String, String> importFolders(JSONObject inner) throws Exception {
+        Map<String, String> idRemap = new LinkedHashMap<>();
+
+        JSONArray folderArr = inner.optJSONArray("folders");
+        if (folderArr == null || folderArr.length() == 0) return idRemap;
+
+        // ===== Load existing folders once to check for name collisions =====
+        List<Yggdrasil.Folder> existing = backend.loadFolders(conn);
+
+        for (int i = 0; i < folderArr.length(); i++) {
+            JSONObject fo         = folderArr.getJSONObject(i);
+            String     exportedId = fo.optString("id",   "").trim();
+            String     name       = fo.optString("name", "").trim();
+
+            // ===== Skip malformed or sentinel entries =====
+            if (exportedId.isBlank() || name.isBlank()) continue;
+            if (Futhark.DEFAULT_FOLDER_ID.equals(exportedId)) continue;
+            if (Futhark.TRASH_FOLDER_ID.equals(exportedId))   continue;
+
+            // ===== Check if a folder with the same name already exists locally =====
+            // ===== If so, remap to it rather than creating a duplicate =====
+            String existingMatchId = null;
+            for (Yggdrasil.Folder f : existing) {
+                if (f.name != null && new String(f.name).equalsIgnoreCase(name)) {
+                    existingMatchId = f.folderId;
+                    break;
+                }
+            }
+
+            if (existingMatchId != null) {
+                // ===== Folder already exists locally - remap exported ID to local ID =====
+                idRemap.put(exportedId, existingMatchId);
+                if (DEBUG) System.out.println("[ImportExport] Folder remapped (exists): " + name + " -> " + existingMatchId);
+            } else {
+                // ===== New folder - create it and record the returned local UUID =====
+                String newId = backend.addFolder(conn, name.toCharArray(), new char[0]);
+                idRemap.put(exportedId, newId);
+                // ===== Refresh existing list so subsequent iterations see the new folder =====
+                existing = backend.loadFolders(conn);
+                if (DEBUG) System.out.println("[ImportExport] Folder created: " + name + " -> " + newId);
+            }
+        }
+        return idRemap;
+    }
+
+    /**
+     * Resolves an exported folderId to the correct local folderId using the remap table.
+     * Falls back to DEFAULT_FOLDER_ID (Unsorted) if the folderId is absent or unmapped.
+     */
+    private String resolveLocalFolderId(String exportedFolderId, Map<String, String> idRemap) {
+        if (exportedFolderId == null || exportedFolderId.isBlank()) {
+            return Futhark.DEFAULT_FOLDER_ID;
+        }
+        // ===== Sentinels pass through unchanged - no remap needed =====
+        if (Futhark.TRASH_FOLDER_ID.equals(exportedFolderId)) {
+            return Futhark.TRASH_FOLDER_ID;
+        }
+        return idRemap.getOrDefault(exportedFolderId, Futhark.DEFAULT_FOLDER_ID);
     }
 
     // ===================================================================================================
@@ -665,12 +795,15 @@ public class ImportExport {
     // ===================================================================================================
 
     /**
-     * Exports all credentials to an Odin encrypted backup JSON string.
+     * Exports all credentials and folders to an Odin encrypted backup JSON string.
      * Uses Argon2id with parameters from the vault's security profile.
      * Fields are decrypted from vault, stored plaintext in inner JSON,
      * then the whole inner blob is encrypted as one GCM CipherString.
+     *
+     * @param folders current folder list from backend.loadFolders() - sentinels are filtered internally
      */
     public String exportToJson(List<Yggdrasil.Credential> credentials,
+                               List<Yggdrasil.Folder> folders,
                                char[] exportPassword,
                                Argon2Profile.Profile profile) throws Exception {
 
@@ -678,7 +811,7 @@ public class ImportExport {
         byte[] stretchKey = deriveArgon2StretchedKey(exportPassword, salt,
                                 profile.iterations(), profile.memoryKb(), profile.parallelism());
         byte[] encKey     = Arrays.copyOfRange(stretchKey, 0,        KEY_BYTES);
-        // macKey retained for HKDF symmetry - not consumed by GCM
+        // ===== macKey retained for HKDF symmetry - not consumed by GCM =====
         byte[] macKey     = Arrays.copyOfRange(stretchKey, KEY_BYTES, KEY_BYTES * 2);
 
         JSONArray items = new JSONArray();
@@ -687,17 +820,19 @@ public class ImportExport {
             if (item != null) items.put(item);
         }
 
+        // ===== Build inner JSON with folders array alongside items =====
         JSONObject inner = new JSONObject();
         inner.put("encrypted", false);
+        inner.put("folders",   buildFoldersArray(folders)); // ===== Folders included in export =====
         inner.put("items",     items);
 
-        // Encrypt entire inner JSON as one GCM CipherString
+        // ===== Encrypt entire inner JSON as one GCM CipherString =====
         String dataCipher       = encryptGcm(inner.toString().getBytes(StandardCharsets.UTF_8), encKey);
-        // encKeyValidation: empty bytes are fine for Odin since we control both sides
+        // ===== encKeyValidation: empty bytes are fine for Odin since we control both sides =====
         String encKeyValidation = encryptGcm(new byte[0], encKey);
 
         JSONObject outer = new JSONObject();
-        outer.put("program",                       "odin"); 
+        outer.put("program",                       "odin");
         outer.put("encrypted",                     true);
         outer.put("passwordProtected",             true);
         outer.put("salt",                          Base64.getEncoder().encodeToString(salt));
@@ -732,44 +867,51 @@ public class ImportExport {
     //   2. encKeyValidation: must encrypt Utils.newGuid() (a UUID string), not
     //      empty bytes. BW importer decrypts this and checks for a non-empty
     //      string to confirm the key is valid before decrypting the data blob.
+    //      Encrypting empty bytes causes "invalid file password" on import.
     //
     // ===================================================================
 
     /**
-     * Exports all credentials to a Bitwarden-compatible encrypted JSON string.
+     * Exports all credentials and folders to a Bitwarden-compatible encrypted JSON string.
      * The resulting file imports cleanly into Bitwarden via:
      *   Settings > Import items > Bitwarden (encrypted JSON) > enter password.
+     *
+     * @param folders current folder list from backend.loadFolders() - sentinels are filtered internally
      */
     public String exportToBitwardenEncryptedJson(List<Yggdrasil.Credential> credentials,
+                                                  List<Yggdrasil.Folder> folders,
                                                   char[] exportPassword) throws Exception {
 
-        // Generate random salt - stored as base64 string, passed as UTF-8 bytes to PBKDF2
+        // ===== Generate random salt - stored as base64 string, passed as UTF-8 bytes to PBKDF2 =====
         byte[] saltRaw    = generateRandom(SALT_BYTES);
         String saltB64    = Base64.getEncoder().encodeToString(saltRaw);
         byte[] stretchKey = derivePbkdf2StretchedKey(exportPassword, saltB64, PBKDF2_ITERATIONS);
         byte[] encKey     = Arrays.copyOfRange(stretchKey, 0,        KEY_BYTES);
         byte[] macKey     = Arrays.copyOfRange(stretchKey, KEY_BYTES, KEY_BYTES * 2);
 
-        // Build plaintext items - fields decrypted from vault, inner JSON encrypted as one blob
+        // ===== Build plaintext items - fields decrypted from vault =====
         JSONArray items = new JSONArray();
         for (Yggdrasil.Credential c : credentials) {
             JSONObject item = buildBitwardenItemPlaintext(c, false);
             if (item != null) items.put(item);
         }
 
+        // ===== Build inner JSON with folders array alongside items =====
         JSONObject inner = new JSONObject();
         inner.put("encrypted", false);
+        inner.put("folders",   buildFoldersArray(folders)); // ===== Folders included in export =====
         inner.put("items",     items);
 
+        // ===== Encrypt entire inner blob as one CBC CipherString =====
         String dataCipher = encryptCbc(
             inner.toString().getBytes(StandardCharsets.UTF_8), encKey, macKey);
 
-        // encKeyValidation: BW source calls encryptString(Utils.newGuid(), key)
-        // Encrypting empty bytes causes "invalid file password" - must be a UUID string
+        // ===== encKeyValidation: BW source calls encryptString(Utils.newGuid(), key) =====
+        // ===== Encrypting empty bytes causes "invalid file password" - must be a UUID string =====
         String encKeyValidation = encryptCbc(
             UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8), encKey, macKey);
 
-        // kdfType=0 (PBKDF2) - no kdfMemory or kdfParallelism since PBKDF2 does not use them
+        // ===== kdfType=0 (PBKDF2) - no kdfMemory or kdfParallelism since PBKDF2 does not use them =====
         JSONObject outer = new JSONObject();
         outer.put("encrypted",                    true);
         outer.put("passwordProtected",             true);
@@ -791,13 +933,13 @@ public class ImportExport {
     // ===================================================================
 
     /**
-     * Imports an Odin encrypted backup JSON.
+     * Imports an Odin encrypted backup JSON including folders.
      * Reads KDF parameters from the file so any Argon2id profile can be imported.
      * Supports both cipherVersion 2 (AES-CBC legacy) and 3 (AES-GCM).
      *
-     * @return count of entries successfully imported
+     * @return int[]{ itemCount, folderCount }
      */
-    public int importFromJson(String json, char[] exportPassword) throws Exception {
+    public int[] importFromJson(String json, char[] exportPassword) throws Exception {
 
         JSONObject outer = new JSONObject(json);
 
@@ -807,13 +949,13 @@ public class ImportExport {
                 "For Bitwarden encrypted exports use the Bitwarden import option.");
         }
 
-        // Read all KDF parameters from the file - supports any Argon2id profile
+        // ===== Read all KDF parameters from the file - supports any Argon2id profile =====
         byte[] salt        = Base64.getDecoder().decode(outer.getString("salt"));
         int kdfType        = outer.optInt("kdfType",        KDF_TYPE_ARGON2);
         int kdfIterations  = outer.optInt("kdfIterations",  3);
         int kdfMemory      = outer.optInt("kdfMemory",      65536);
         int kdfParallelism = outer.optInt("kdfParallelism", 4);
-        // cipherVersion defaults to 2 (CBC) for backwards compat with old backups
+        // ===== cipherVersion defaults to 2 (CBC) for backwards compat with old backups =====
         int cipherVersion  = outer.optInt("cipherVersion",  2);
 
         if (kdfType != KDF_TYPE_ARGON2) {
@@ -834,7 +976,7 @@ public class ImportExport {
         byte[] encKey     = Arrays.copyOfRange(stretchKey, 0,        KEY_BYTES);
         byte[] macKey     = Arrays.copyOfRange(stretchKey, KEY_BYTES, KEY_BYTES * 2);
 
-        // Fast-fail on wrong password before decrypting the full data blob
+        // ===== Fast-fail on wrong password before decrypting the full data blob =====
         try {
             decryptCipherString(outer.getString("encKeyValidation_DO_NOT_EDIT"),
                                 encKey, macKey, cipherVersion);
@@ -854,28 +996,36 @@ public class ImportExport {
         Arrays.fill(macKey,     (byte) 0);
 
         JSONObject inner = new JSONObject(plainJson);
-        JSONArray  items = inner.getJSONArray("items");
-        int        count = 0;
+
+        // ===== IMPORT FOLDERS FIRST - build remap table before processing items =====
+        // ===== Items reference folderIds that must exist before addEntry() is called =====
+        Map<String, String> folderRemap = importFolders(inner);
+        int folderCount = folderRemap.size();
+
+        JSONArray items = inner.getJSONArray("items");
+        int itemCount   = 0;
 
         for (int i = 0; i < items.length(); i++) {
             try {
                 Object[] parsed = parseBitwardenItem(items.getJSONObject(i), true);
                 if (parsed == null) continue;
-                char[]   tag            = (char[])  parsed[0];
-                String   odinType       = (String)  parsed[1];
-                char[][] dataFields     = (char[][]) parsed[2];
-                String   creationDate   = (String)  parsed[3];
-                String   revisionDate   = (String)  parsed[4];
-                String   folderId         = (String)  parsed[5];
-                backend.addEntry(conn, tag, odinType.toCharArray(), dataFields, dbType, folderId, creationDate, revisionDate);
+                char[]   tag          = (char[])  parsed[0];
+                String   odinType     = (String)  parsed[1];
+                char[][] dataFields   = (char[][]) parsed[2];
+                String   creationDate = (String)  parsed[3];
+                String   revisionDate = (String)  parsed[4];
+                // ===== Remap exported folderId to local folderId =====
+                String   localFolderId = resolveLocalFolderId((String) parsed[5], folderRemap);
+                backend.addEntry(conn, tag, odinType.toCharArray(), dataFields, dbType,
+                    localFolderId, creationDate, revisionDate);
                 for (char[] d : dataFields) if (d != null) Yggdrasil.wipeCharArray(d);
                 Yggdrasil.wipeCharArray(tag);
-                count++;
+                itemCount++;
             } catch (Exception ex) {
                 System.err.println("[ImportExport] Skipped item " + i + ": " + ex.getMessage());
             }
         }
-        return count;
+        return new int[]{ itemCount, folderCount };
     }
 
     // ===================================================================
@@ -897,20 +1047,20 @@ public class ImportExport {
     // ===================================================================
 
     /**
-     * Imports a Bitwarden encrypted JSON export (password-protected format).
+     * Imports a Bitwarden encrypted JSON export (password-protected format) including folders.
      * Works with files exported from Bitwarden directly or from Odin's
      * "Export Bitwarden encrypted JSON" option.
      *
      * Supports kdfType 0 (PBKDF2-SHA256) only - the only type Bitwarden uses
      * for password-protected exports.
      *
-     * @return count of entries successfully imported
+     * @return int[]{ itemCount, folderCount }
      */
-    public int importFromBitwardenEncryptedJson(String json, char[] exportPassword) throws Exception {
+    public int[] importFromBitwardenEncryptedJson(String json, char[] exportPassword) throws Exception {
 
         JSONObject outer = new JSONObject(json);
 
-        // Guard: must be password-protected encrypted
+        // ===== Guard: must be password-protected encrypted =====
         if (!outer.optBoolean("passwordProtected", false) ||
             !outer.optBoolean("encrypted", false)) {
             throw new IllegalArgumentException(
@@ -918,7 +1068,7 @@ public class ImportExport {
                 "For unencrypted exports use the RAM disk import option.");
         }
 
-        // Read KDF parameters from the file
+        // ===== Read KDF parameters from the file =====
         int kdfType       = outer.optInt("kdfType",       KDF_TYPE_PBKDF2);
         int kdfIterations = outer.optInt("kdfIterations", PBKDF2_ITERATIONS);
 
@@ -928,9 +1078,9 @@ public class ImportExport {
                 "Only PBKDF2 (kdfType=0) password-protected exports are supported.");
         }
 
-        // CRITICAL: salt is the base64 STRING from the JSON - pass as UTF-8 bytes to PBKDF2
-        // Do NOT Base64-decode the salt. See class-level javadoc for the full explanation.
-        String saltB64    = outer.getString("salt");
+        // ===== CRITICAL: salt is the base64 STRING from the JSON - pass as UTF-8 bytes to PBKDF2 =====
+        // ===== Do NOT Base64-decode the salt. See class-level javadoc for the full explanation. =====
+        String saltB64 = outer.getString("salt");
 
         if (DEBUG) {
             System.out.println("[ImportExport] BW encrypted import");
@@ -942,8 +1092,8 @@ public class ImportExport {
         byte[] encKey     = Arrays.copyOfRange(stretchKey, 0,        KEY_BYTES);
         byte[] macKey     = Arrays.copyOfRange(stretchKey, KEY_BYTES, KEY_BYTES * 2);
 
-        // Validate key against encKeyValidation before touching the data blob
-        // Bitwarden stored a UUID string here - if decryption throws, password is wrong
+        // ===== Validate key against encKeyValidation before touching the data blob =====
+        // ===== Bitwarden stored a UUID string here - if decryption throws, password is wrong =====
         try {
             decryptCbc(outer.getString("encKeyValidation_DO_NOT_EDIT"), encKey, macKey);
         } catch (Exception e) {
@@ -953,7 +1103,7 @@ public class ImportExport {
             throw new SecurityException("Wrong password or corrupted Bitwarden export file.");
         }
 
-        // Decrypt the full data blob - result is inner plaintext JSON
+        // ===== Decrypt the full data blob - result is inner plaintext JSON =====
         byte[] plainBytes = decryptCbc(outer.getString("data"), encKey, macKey);
         String plainJson  = new String(plainBytes, StandardCharsets.UTF_8);
         Arrays.fill(plainBytes, (byte) 0);
@@ -962,33 +1112,39 @@ public class ImportExport {
         Arrays.fill(encKey,     (byte) 0);
         Arrays.fill(macKey,     (byte) 0);
 
-        // Parse the inner JSON - fields are plaintext strings at this point
+        // ===== Parse the inner JSON - fields are plaintext strings at this point =====
         JSONObject inner = new JSONObject(plainJson);
         JSONArray  items = inner.optJSONArray("items");
         if (items == null || items.length() == 0) {
             throw new IllegalArgumentException("No items found in Bitwarden export.");
         }
 
-        int count = 0;
+        // ===== IMPORT FOLDERS FIRST - build remap table before processing items =====
+        Map<String, String> folderRemap = importFolders(inner);
+        int folderCount = folderRemap.size();
+
+        int itemCount = 0;
         for (int i = 0; i < items.length(); i++) {
             try {
                 Object[] parsed = parseBitwardenItem(items.getJSONObject(i), false);
                 if (parsed == null) continue;
-                char[]   tag        = (char[])  parsed[0];
-                String   odinType   = (String)  parsed[1];
-                char[][] dataFields = (char[][]) parsed[2];
-                String   creationDate   = (String)  parsed[3];
-                String   revisionDate   = (String)  parsed[4];
-                String   folderId         = (String)  parsed[5];
-                backend.addEntry(conn, tag, odinType.toCharArray(), dataFields, dbType, folderId, creationDate, revisionDate);
+                char[]   tag           = (char[])  parsed[0];
+                String   odinType      = (String)  parsed[1];
+                char[][] dataFields    = (char[][]) parsed[2];
+                String   creationDate  = (String)  parsed[3];
+                String   revisionDate  = (String)  parsed[4];
+                // ===== Remap exported folderId to local folderId =====
+                String   localFolderId = resolveLocalFolderId((String) parsed[5], folderRemap);
+                backend.addEntry(conn, tag, odinType.toCharArray(), dataFields, dbType,
+                    localFolderId, creationDate, revisionDate);
                 for (char[] d : dataFields) if (d != null) Yggdrasil.wipeCharArray(d);
                 Yggdrasil.wipeCharArray(tag);
-                count++;
+                itemCount++;
             } catch (Exception ex) {
                 System.err.println("[ImportExport] Skipped item " + i + ": " + ex.getMessage());
             }
         }
-        return count;
+        return new int[]{ itemCount, folderCount };
     }
 
     // ===================================================================
@@ -996,17 +1152,17 @@ public class ImportExport {
     // ===================================================================
 
     /**
-     * Imports a Bitwarden unencrypted JSON export.
+     * Imports a Bitwarden unencrypted JSON export including folders.
      * Called after RamDiskImporter.run() reads the file into memory.
      * The file never touched persistent storage - pure RAM operation.
      *
-     * @return count of entries successfully imported
+     * @return int[]{ itemCount, folderCount }
      */
-    public int importFromBitwardenJson(String json) throws Exception {
+    public int[] importFromBitwardenJson(String json) throws Exception {
 
         JSONObject outer = new JSONObject(json);
 
-        // Guard against accidentally passing an encrypted export here
+        // ===== Guard against accidentally passing an encrypted export here =====
         if (outer.optBoolean("encrypted", false)) {
             throw new IllegalArgumentException(
                 "This is an encrypted export. Use the Bitwarden encrypted import option instead.");
@@ -1017,27 +1173,33 @@ public class ImportExport {
             throw new IllegalArgumentException("No items found in Bitwarden export.");
         }
 
-        int count = 0;
+        // ===== IMPORT FOLDERS FIRST - remap table built before items are processed =====
+        Map<String, String> folderRemap = importFolders(outer);
+        int folderCount = folderRemap.size();
+
+        int itemCount = 0;
         for (int i = 0; i < items.length(); i++) {
             try {
-                // Fields are already plaintext in an unencrypted Bitwarden export
+                // ===== Fields are already plaintext in an unencrypted Bitwarden export =====
                 Object[] parsed = parseBitwardenItem(items.getJSONObject(i), false);
                 if (parsed == null) continue;
-                char[]   tag        = (char[])  parsed[0];
-                String   odinType   = (String)  parsed[1];
-                char[][] dataFields = (char[][]) parsed[2];
-                String   creationDate   = (String)  parsed[3];
-                String   revisionDate   = (String)  parsed[4];
-                String   folderId         = (String)  parsed[5];
-                backend.addEntry(conn, tag, odinType.toCharArray(), dataFields, dbType, folderId, creationDate, revisionDate);
+                char[]   tag           = (char[])  parsed[0];
+                String   odinType      = (String)  parsed[1];
+                char[][] dataFields    = (char[][]) parsed[2];
+                String   creationDate  = (String)  parsed[3];
+                String   revisionDate  = (String)  parsed[4];
+                // ===== Remap exported folderId to local folderId =====
+                String   localFolderId = resolveLocalFolderId((String) parsed[5], folderRemap);
+                backend.addEntry(conn, tag, odinType.toCharArray(), dataFields, dbType,
+                    localFolderId, creationDate, revisionDate);
                 for (char[] d : dataFields) if (d != null) Yggdrasil.wipeCharArray(d);
                 Yggdrasil.wipeCharArray(tag);
-                count++;
+                itemCount++;
             } catch (Exception ex) {
                 System.err.println("[ImportExport] Skipped item " + i + ": " + ex.getMessage());
             }
         }
-        return count;
+        return new int[]{ itemCount, folderCount };
     }
 
     // ===============================================================================================================================
@@ -1047,6 +1209,7 @@ public class ImportExport {
     /**
      * Converts one Odin credential to a Bitwarden-format JSON item with PLAINTEXT fields.
      * Decrypts each field from the vault. Encryption happens at the outer envelope level.
+     * folderId is always emitted so the import side can remap it correctly.
      */
     private JSONObject buildBitwardenItemPlaintext(Yggdrasil.Credential c, boolean odin) throws Exception {
         Futhark.EntryType type = Futhark.forKey(c.type);
@@ -1055,18 +1218,20 @@ public class ImportExport {
         JSONObject item = new JSONObject();
         item.put("id",             UUID.randomUUID().toString());
         item.put("organizationId", JSONObject.NULL);
-        item.put("folderId",       JSONObject.NULL);
         item.put("favorite",       false);
         item.put("reprompt",       0);
-        // Tag/name stored as plaintext - outer envelope protects everything
+        // ===== Tag/name stored as plaintext - outer envelope protects everything =====
         item.put("name",           new String(c.tag));
 
         switch (c.type) {
 
             // ===== ACCOUNT -> login (type 1) =====
-            // data0=URL, data1=username, data2=password, data3=notes
+            // ===== data0=URL, data1=username, data2=password, data3=notes =====
             case "account" -> {
-                item.put("type", BW_LOGIN);
+                item.put("type",         BW_LOGIN);
+                item.put("folderId",     c.folderId != null ? c.folderId : JSONObject.NULL); // ===== Always emit folderId =====
+                item.put("creationDate", c.creationDate);
+                item.put("revisionDate", c.revisionDate);
                 JSONObject login = new JSONObject();
                 login.put("uris",     buildUrisPlaintext(decryptField(c, 0)));
                 login.put("username", decryptField(c, 1));
@@ -1074,23 +1239,19 @@ public class ImportExport {
                 login.put("totp",     JSONObject.NULL);
                 item.put("login", login);
                 item.put("notes", decryptField(c, 3));
-                if (odin) {
-                item.put("creationDate", c.creationDate);
-                item.put("revisionDate", c.revisionDate);
-                } else {
-                item.put("creationDate", c.creationDate);
-                item.put("revisionDate", c.revisionDate);
-                }
             }
 
             // ===== CARD -> card (type 3) =====
-            // data0=name, data1=number, data2=expiry (MM/YYYY), data3=cvv, data6=notes
+            // ===== data0=name, data1=number, data2=expiry (MM/YYYY), data3=cvv, data6=notes =====
             case "card" -> {
-                item.put("type", BW_CARD);
+                item.put("type",         BW_CARD);
+                item.put("folderId",     c.folderId != null ? c.folderId : JSONObject.NULL); // ===== Always emit folderId =====
+                item.put("creationDate", c.creationDate);
+                item.put("revisionDate", c.revisionDate);
                 JSONObject card = new JSONObject();
                 card.put("cardholderName", decryptField(c, 0));
                 card.put("number",         decryptField(c, 1));
-                // Expiry stored whole (MM/YYYY) - split for Bitwarden compatibility
+                // ===== Expiry stored whole (MM/YYYY) - split for Bitwarden compatibility =====
                 String   expiry   = decryptField(c, 2);
                 String[] expParts = expiry.contains("/") ? expiry.split("/", 2) : new String[]{ expiry, "" };
                 card.put("expMonth", expParts[0]);
@@ -1098,20 +1259,15 @@ public class ImportExport {
                 card.put("code",     decryptField(c, 3));
                 item.put("card",  card);
                 item.put("notes", decryptField(c, 6));
-                if (odin) {
-                item.put("folderId", c.folderId);
-                item.put("creationDate", c.creationDate);
-                item.put("revisionDate", c.revisionDate);
-                } else {
-                item.put("creationDate", c.creationDate);
-                item.put("revisionDate", c.revisionDate);
-                }
             }
 
             // ===== ADDRESS -> identity (type 4) =====
-            // data0=name, data1=street, data2=city, data3=state, data4=postal, data5=country, data6=notes
+            // ===== data0=name, data1=street, data2=city, data3=state, data4=postal, data5=country, data6=notes =====
             case "address" -> {
-                item.put("type", BW_IDENTITY);
+                item.put("type",         BW_IDENTITY);
+                item.put("folderId",     c.folderId != null ? c.folderId : JSONObject.NULL); // ===== Always emit folderId =====
+                item.put("creationDate", c.creationDate);
+                item.put("revisionDate", c.revisionDate);
                 JSONObject identity = new JSONObject();
                 identity.put("fullName",   decryptField(c, 0));
                 identity.put("address1",   decryptField(c, 1));
@@ -1121,216 +1277,196 @@ public class ImportExport {
                 identity.put("country",    decryptField(c, 5));
                 item.put("identity", identity);
                 item.put("notes",    decryptField(c, 6));
-                if (odin) {
-                item.put("folderId", c.folderId);
-                item.put("creationDate", c.creationDate);
-                item.put("revisionDate", c.revisionDate);
-                } else {
-                item.put("creationDate", c.creationDate);
-                item.put("revisionDate", c.revisionDate);
-                }
             }
 
             // ===== SSH, VPN, PASSKEY -> secureNote + custom fields =====
             case "ssh", "vpn", "passkey" -> {
                 if (odin) {
-                    if (c.type.equals("ssh")){
-                        item.put("type",       ODIN_SSH);
-                        JSONObject odinItem = new JSONObject();
-                        odinItem.put("hostname",        decryptField(c, 0));
-                        odinItem.put("username",        decryptField(c, 1));
-                        odinItem.put("priv_key",        decryptField(c, 2));
-                        odinItem.put("pub_key",         decryptField(c, 3));
-                        odinItem.put("passphrase",      decryptField(c, 4));
-                        odinItem.put("type",            decryptField(c, 5));
-                        odinItem.put("notes",           decryptField(c, 6));
-                        item.put("folderId", c.folderId);
+                    if (c.type.equals("ssh")) {
+                        item.put("type",         ODIN_SSH);
+                        item.put("folderId",     c.folderId != null ? c.folderId : JSONObject.NULL);
                         item.put("creationDate", c.creationDate);
                         item.put("revisionDate", c.revisionDate);
+                        JSONObject odinItem = new JSONObject();
+                        odinItem.put("hostname",   decryptField(c, 0));
+                        odinItem.put("username",   decryptField(c, 1));
+                        odinItem.put("priv_key",   decryptField(c, 2));
+                        odinItem.put("pub_key",    decryptField(c, 3));
+                        odinItem.put("passphrase", decryptField(c, 4));
+                        odinItem.put("type",       decryptField(c, 5));
+                        odinItem.put("notes",      decryptField(c, 6));
                         item.put("odinSSH", odinItem);
-                    } else if (c.type.equals("vpn")){
-                        item.put("type",       ODIN_VPN);
-                        JSONObject odinItem = new JSONObject();
-                        odinItem.put("hostname",        decryptField(c, 0));
-                        odinItem.put("username",        decryptField(c, 1));
-                        odinItem.put("password-psk",    decryptField(c, 2));
-                        odinItem.put("config-key",      decryptField(c, 3));
-                        odinItem.put("protocol",        decryptField(c, 4));
-                        odinItem.put("port",            decryptField(c, 5));
-                        odinItem.put("notes",           decryptField(c, 6));
-                        item.put("folderId", c.folderId);
+                    } else if (c.type.equals("vpn")) {
+                        item.put("type",         ODIN_VPN);
+                        item.put("folderId",     c.folderId != null ? c.folderId : JSONObject.NULL);
                         item.put("creationDate", c.creationDate);
                         item.put("revisionDate", c.revisionDate);
+                        JSONObject odinItem = new JSONObject();
+                        odinItem.put("hostname",    decryptField(c, 0));
+                        odinItem.put("username",    decryptField(c, 1));
+                        odinItem.put("password-psk", decryptField(c, 2));
+                        odinItem.put("config-key",  decryptField(c, 3));
+                        odinItem.put("protocol",    decryptField(c, 4));
+                        odinItem.put("port",        decryptField(c, 5));
+                        odinItem.put("notes",       decryptField(c, 6));
                         item.put("odinVPN", odinItem);
                     } else if (c.type.equals("passkey")) {
-                        item.put("type",       ODIN_PASSKEY);
-                        JSONObject odinItem = new JSONObject();
-                        odinItem.put("site",            decryptField(c, 0));
-                        odinItem.put("username",        decryptField(c, 1));
-                        odinItem.put("cred_id",         decryptField(c, 2));
-                        odinItem.put("priv_key",        decryptField(c, 3));
-                        odinItem.put("pub_key",         decryptField(c, 4));
-                        odinItem.put("algorithm",       decryptField(c, 5));
-                        odinItem.put("notes",           decryptField(c, 6));
-                        item.put("folderId", c.folderId);
+                        item.put("type",         ODIN_PASSKEY);
+                        item.put("folderId",     c.folderId != null ? c.folderId : JSONObject.NULL);
                         item.put("creationDate", c.creationDate);
                         item.put("revisionDate", c.revisionDate);
+                        JSONObject odinItem = new JSONObject();
+                        odinItem.put("site",      decryptField(c, 0));
+                        odinItem.put("username",  decryptField(c, 1));
+                        odinItem.put("cred_id",   decryptField(c, 2));
+                        odinItem.put("priv_key",  decryptField(c, 3));
+                        odinItem.put("pub_key",   decryptField(c, 4));
+                        odinItem.put("algorithm", decryptField(c, 5));
+                        odinItem.put("notes",     decryptField(c, 6));
                         item.put("odinPasskey", odinItem);
                     } else { return null; }
 
-                        // Build custom fields array for any additional sensitive metadata
-                        JSONArray fields = new JSONArray();
-                        if (type != null) {
-                            for (int i = 0; i < type.fields.size(); i++) {
-                                String val = decryptField(c, i);
-                                if (val.isEmpty()) continue;
-                                Futhark.Field f = type.fields.get(i);
-                                JSONObject field = new JSONObject();
-                                field.put("name",  f.label); /// TAG
-                                field.put("value", val);
-                                // 1 = hidden/sensitive, 0 = plain text
-                                field.put("type",  (f.sensitive || f.password) ? 1 : 0);
-                                fields.put(field);
-                            }
+                    // ===== Build custom fields array for any additional sensitive metadata =====
+                    JSONArray fields = new JSONArray();
+                    if (type != null) {
+                        for (int i = 0; i < type.fields.size(); i++) {
+                            String val = decryptField(c, i);
+                            if (val.isEmpty()) continue;
+                            Futhark.Field f = type.fields.get(i);
+                            JSONObject field = new JSONObject();
+                            field.put("name",  f.label);
+                            field.put("value", val);
+                            // ===== 1 = hidden/sensitive, 0 = plain text =====
+                            field.put("type",  (f.sensitive || f.password) ? 1 : 0);
+                            fields.put(field);
                         }
-                        item.put("fields", fields);
-
-                } else if (!odin) {
-                    // BITWARDEN - doesn't compare to our fields 
-                item.put("type",       BW_NOTE);
-                item.put("secureNote", new JSONObject().put("type", 0));
-                item.put("notes",      JSONObject.NULL);
-                JSONArray fields = new JSONArray();
-                if (type != null) {
-                    for (int i = 0; i < type.fields.size(); i++) {
-                        String val = decryptField(c, i);
-                        if (val.isEmpty()) continue;
-                        Futhark.Field f = type.fields.get(i);
-                        JSONObject field = new JSONObject();
-                        field.put("name",  f.label); /// TAG
-                        field.put("value", val);
-                        // 1 = hidden/sensitive field, 0 = text field
-                        field.put("type",  (f.sensitive || f.password) ? 1 : 0);
-                        fields.put(field);
                     }
+                    item.put("fields", fields);
+
+                } else {
+                    // ===== BITWARDEN export - map to secureNote with custom fields =====
+                    item.put("type",       BW_NOTE);
+                    item.put("folderId",   c.folderId != null ? c.folderId : JSONObject.NULL);
+                    item.put("secureNote", new JSONObject().put("type", 0));
+                    item.put("notes",      JSONObject.NULL);
+                    JSONArray fields = new JSONArray();
+                    if (type != null) {
+                        for (int i = 0; i < type.fields.size(); i++) {
+                            String val = decryptField(c, i);
+                            if (val.isEmpty()) continue;
+                            Futhark.Field f = type.fields.get(i);
+                            JSONObject field = new JSONObject();
+                            field.put("name",  f.label);
+                            field.put("value", val);
+                            // ===== 1 = hidden/sensitive field, 0 = text field =====
+                            field.put("type",  (f.sensitive || f.password) ? 1 : 0);
+                            fields.put(field);
+                        }
+                    }
+                    item.put("fields", fields);
                 }
-                item.put("fields", fields);
+            }
+
+            case "binary" -> {
+                if (odin) {
+                    item.put("type",         ODIN_BINARY);
+                    item.put("folderId",     c.folderId != null ? c.folderId : JSONObject.NULL);
+                    item.put("creationDate", c.creationDate);
+                    item.put("revisionDate", c.revisionDate);
+                    JSONObject odinItem = new JSONObject();
+                    odinItem.put("system",      decryptField(c, 0));
+                    odinItem.put("username",    decryptField(c, 1));
+                    odinItem.put("base64",      decryptField(c, 2));
+                    odinItem.put("filename",    decryptField(c, 3));
+                    odinItem.put("sha256-file", decryptField(c, 4));
+                    odinItem.put("sha256-data", decryptField(c, 5));
+                    odinItem.put("notes",       decryptField(c, 6));
+                    item.put("odinBinary", odinItem);
+                    // ===== Build custom fields array for additional metadata =====
+                    JSONArray fields = new JSONArray();
+                    if (type != null) {
+                        for (int i = 0; i < type.fields.size(); i++) {
+                            String val = decryptField(c, i);
+                            if (val.isEmpty()) continue;
+                            Futhark.Field f = type.fields.get(i);
+                            JSONObject field = new JSONObject();
+                            field.put("name",  f.label);
+                            field.put("value", val);
+                            field.put("type",  (f.sensitive || f.password) ? 1 : 0);
+                            fields.put(field);
+                        }
+                    }
+                    item.put("fields", fields);
                 } else { return null; }
             }
 
-                case "binary" -> {
-                    if (odin) {
-                        // Build the odinBinary sub-object with decrypted file metadata
-                        item.put("type",       ODIN_BINARY);
-                        
-                        JSONObject odinItem = new JSONObject();
-                        odinItem.put("system",       decryptField(c, 0));
-                        odinItem.put("username",     decryptField(c, 1));
-                        odinItem.put("base64",       decryptField(c, 2));
-                        odinItem.put("filename",     decryptField(c, 3));
-                        odinItem.put("sha256-file",  decryptField(c, 4));
-                        odinItem.put("sha256-data",  decryptField(c, 5));
-                        odinItem.put("notes",        decryptField(c, 6));
-                        item.put("folderId", c.folderId);
-                        item.put("creationDate", c.creationDate);
-                        item.put("revisionDate", c.revisionDate);
-                        item.put("odinBinary", odinItem);
-
-                        // Build custom fields array for any additional sensitive metadata
-                        JSONArray fields = new JSONArray();
-                        if (type != null) {
-                            for (int i = 0; i < type.fields.size(); i++) {
-                                String val = decryptField(c, i);
-                                if (val.isEmpty()) continue;
-                                Futhark.Field f = type.fields.get(i);
-                                JSONObject field = new JSONObject();
-                                field.put("name",  f.label); /// TAG
-                                field.put("value", val);
-                                // 1 = hidden/sensitive, 0 = plain text
-                                field.put("type",  (f.sensitive || f.password) ? 1 : 0);
-                                fields.put(field);
-                            }
+            case "note" -> {
+                if (odin) {
+                    item.put("type",         ODIN_NOTES);
+                    item.put("folderId",     c.folderId != null ? c.folderId : JSONObject.NULL);
+                    item.put("creationDate", c.creationDate);
+                    item.put("revisionDate", c.revisionDate);
+                    JSONObject odinItem = new JSONObject();
+                    odinItem.put("subject", decryptField(c, 0));
+                    odinItem.put("notes",   decryptField(c, 1));
+                    item.put("odinNote", odinItem);
+                    // ===== Build custom fields array for additional metadata =====
+                    JSONArray fields = new JSONArray();
+                    if (type != null) {
+                        for (int i = 0; i < type.fields.size(); i++) {
+                            String val = decryptField(c, i);
+                            if (val.isEmpty()) continue;
+                            Futhark.Field f = type.fields.get(i);
+                            JSONObject field = new JSONObject();
+                            field.put("name",  f.label);
+                            field.put("value", val);
+                            field.put("type",  (f.sensitive || f.password) ? 1 : 0);
+                            fields.put(field);
                         }
-                        item.put("fields", fields);
-                        } else { return null; }
                     }
+                    item.put("fields", fields);
+                } else {
+                    // ===== NOTE -> secureNote (type 2) for Bitwarden =====
+                    item.put("type",         BW_NOTE);
+                    item.put("folderId",     c.folderId != null ? c.folderId : JSONObject.NULL);
+                    item.put("name",         decryptField(c, 0));
+                    item.put("notes",        decryptField(c, 1));
+                    item.put("secureNote",   new JSONObject().put("type", 0));
+                    item.put("creationDate", c.creationDate);
+                    item.put("revisionDate", c.revisionDate);
+                }
+            }
 
-                    case "note" -> {
-                    if (odin) {
-                        // Build the odinBinary sub-object with decrypted file metadata
-                        item.put("type",       ODIN_NOTES);
-                        
-                        JSONObject odinItem = new JSONObject();
-                        odinItem.put("subject",       decryptField(c, 0));
-                        odinItem.put("notes",       decryptField(c, 1));
-                        item.put("folderId", c.folderId);
-                        item.put("creationDate", c.creationDate);
-                        item.put("revisionDate", c.revisionDate);
-                        
-                        item.put("odinNote", odinItem);
-
-                        // Build custom fields array for any additional sensitive metadata
-                        JSONArray fields = new JSONArray();
-                        if (type != null) {
-                            for (int i = 0; i < type.fields.size(); i++) {
-                                String val = decryptField(c, i);
-                                if (val.isEmpty()) continue;
-                                Futhark.Field f = type.fields.get(i);
-                                JSONObject field = new JSONObject();
-                                field.put("name",  f.label); /// TAG
-                                field.put("value", val);
-                                // 1 = hidden/sensitive, 0 = plain text
-                                field.put("type",  (f.sensitive || f.password) ? 1 : 0);
-                                fields.put(field);
-                            }
+            case "docs" -> {
+                if (odin) {
+                    item.put("type",         ODIN_DOCS);
+                    item.put("folderId",     c.folderId != null ? c.folderId : JSONObject.NULL);
+                    item.put("creationDate", c.creationDate);
+                    item.put("revisionDate", c.revisionDate);
+                    JSONObject odinItem = new JSONObject();
+                    odinItem.put("base64",      decryptField(c, 0));
+                    odinItem.put("filename",    decryptField(c, 1));
+                    odinItem.put("sha256-file", decryptField(c, 2));
+                    odinItem.put("sha256-data", decryptField(c, 3));
+                    odinItem.put("notes",       decryptField(c, 4));
+                    item.put("odinDocs", odinItem);
+                    // ===== Build custom fields array for additional metadata =====
+                    JSONArray fields = new JSONArray();
+                    if (type != null) {
+                        for (int i = 0; i < type.fields.size(); i++) {
+                            String val = decryptField(c, i);
+                            if (val.isEmpty()) continue;
+                            Futhark.Field f = type.fields.get(i);
+                            JSONObject field = new JSONObject();
+                            field.put("name",  f.label);
+                            field.put("value", val);
+                            field.put("type",  (f.sensitive || f.password) ? 1 : 0);
+                            fields.put(field);
                         }
-                        item.put("fields", fields);
-                        } else if (!odin) {
-                            // ===== NOTE -> secureNote (type 2) =====
-                            // data0=subject, data1=body
-                                item.put("type",       BW_NOTE);
-                                item.put("name",       decryptField(c, 0));
-                                item.put("notes",      decryptField(c, 1));
-                                item.put("secureNote", new JSONObject().put("type", 0));
-                                item.put("creationDate", c.creationDate);
-                                item.put("revisionDate", c.revisionDate);
-                        } else { return null; }
                     }
-            
-                    case "docs" -> {
-                    if (odin) {
-                        // Build the odinDocs sub-object with decrypted file metadata
-                        item.put("type",       ODIN_DOCS);
-                        
-                        JSONObject odinItem = new JSONObject();
-                        odinItem.put("base64",       decryptField(c, 0));
-                        odinItem.put("filename",     decryptField(c, 1));
-                        odinItem.put("sha256-file",  decryptField(c, 2));
-                        odinItem.put("sha256-data",  decryptField(c, 3));
-                        odinItem.put("notes",        decryptField(c, 4));
-                        item.put("folderId", c.folderId);
-                        item.put("creationDate", c.creationDate);
-                        item.put("revisionDate", c.revisionDate);
-                        item.put("odinDocs", odinItem);
-
-                        // Build custom fields array for any additional sensitive metadata
-                        JSONArray fields = new JSONArray();
-                        if (type != null) {
-                            for (int i = 0; i < type.fields.size(); i++) {
-                                String val = decryptField(c, i);
-                                if (val.isEmpty()) continue;
-                                Futhark.Field f = type.fields.get(i);
-                                JSONObject field = new JSONObject();
-                                field.put("name",  f.label); /// TAG
-                                field.put("value", val);
-                                // 1 = hidden/sensitive, 0 = plain text
-                                field.put("type",  (f.sensitive || f.password) ? 1 : 0);
-                                fields.put(field);
-                            }
-                        }
-                        item.put("fields", fields);
-                        } else { return null; }
-                    }
+                    item.put("fields", fields);
+                } else { return null; }
+            }
 
             default -> { return null; }
         }
@@ -1338,11 +1474,11 @@ public class ImportExport {
     }
 
     private String optStringMulti(JSONObject obj, String defaultValue, String... keys) {
-    for (String key : keys) {
-        String val = obj.optString(key, "");
-        if (!val.isEmpty()) return val;
-    }
-    return defaultValue;
+        for (String key : keys) {
+            String val = obj.optString(key, "");
+            if (!val.isEmpty()) return val;
+        }
+        return defaultValue;
     }
 
     // =================================================================================================================================
@@ -1356,20 +1492,24 @@ public class ImportExport {
      *   - Bitwarden encrypted: decrypted at outer envelope level before here
      *   - Bitwarden unencrypted: already plaintext
      *
-     * @return Object[]{ char[] tag, String odinType, char[][] dataFields } or null to skip
+     * folderId is returned as parsed[5] - caller must run it through resolveLocalFolderId().
+     *
+     * @return Object[]{ char[] tag, String odinType, char[][] dataFields,
+     *                   String creationDate, String revisionDate, String folderId } or null to skip
      */
     private Object[] parseBitwardenItem(JSONObject item, boolean odin) {
         try {
-            int    bwType = item.getInt("type");
-            String name   = item.optString("name",  "");
-            String notes  = item.optString("notes", "");
+            int    bwType       = item.getInt("type");
+            String name         = item.optString("name",         "");
+            String notes        = item.optString("notes",        "");
             String creationDate = item.optString("creationDate", "");
             String revisionDate = item.optString("revisionDate", "");
-            String folderId  = item.optString("folderId", "");
+            // ===== folderId read here - caller remaps it via resolveLocalFolderId() =====
+            String folderId     = item.optString("folderId",     "");
 
-            // 9 data slots - matches Futhark.DATA_COLUMNS
-            char[][] data     = new char[9][];
-            String   odinType=null;
+            // ===== 9 data slots - matches Futhark.DATA_COLUMNS =====
+            char[][] data    = new char[9][];
+            String   odinType = null;
 
             switch (bwType) {
 
@@ -1380,7 +1520,7 @@ public class ImportExport {
                     if (login != null) {
                         JSONArray uris = login.optJSONArray("uris");
                         if (uris != null && uris.length() > 0) {
-                            // First URI only - Odin stores one URL per account entry
+                            // ===== First URI only - Odin stores one URL per account entry =====
                             data[0] = uris.getJSONObject(0).optString("uri", "").toCharArray();
                         }
                         data[1] = login.optString("username", "").toCharArray();
@@ -1391,37 +1531,37 @@ public class ImportExport {
 
                 // ===== SECURE NOTE -> note or Odin custom type =====
                 case BW_NOTE -> {
-                    if (!odin){
-                    JSONArray fields = item.optJSONArray("fields");
-                    if (fields != null && fields.length() > 0) {
-                        // ===== Type detected by scoring field label matches across all Odin types =====
-                        odinType = detectOdinTypeFromFields(fields);
-                        Futhark.EntryType et = Futhark.forKey(odinType);
-                        if (et != null) {
-                            for (int i = 0; i < fields.length(); i++) {
-                                JSONObject f  = fields.getJSONObject(i);
-                                String     fn = f.optString("name",  "");
-                                String     fv = f.optString("value", "");
-                                int        di = labelToDataIndex(et, fn);
-                                if (di >= 0 && di < 8) data[di] = fv.toCharArray();
+                    if (!odin) {
+                        JSONArray fields = item.optJSONArray("fields");
+                        if (fields != null && fields.length() > 0) {
+                            // ===== Type detected by scoring field label matches across all Odin types =====
+                            odinType = detectOdinTypeFromFields(fields);
+                            Futhark.EntryType et = Futhark.forKey(odinType);
+                            if (et != null) {
+                                for (int i = 0; i < fields.length(); i++) {
+                                    JSONObject f  = fields.getJSONObject(i);
+                                    String     fn = f.optString("name",  "");
+                                    String     fv = f.optString("value", "");
+                                    int        di = labelToDataIndex(et, fn);
+                                    if (di >= 0 && di < 8) data[di] = fv.toCharArray();
+                                }
                             }
+                        } else {
+                            odinType = "note";
+                            data[0]  = name.toCharArray();
+                            data[1]  = notes.toCharArray();
                         }
-                    } else {
-                        odinType = "note";
-                        data[0]  = name.toCharArray();
-                        data[1]  = notes.toCharArray();
                     }
                 }
-            }
 
                 case ODIN_NOTES -> {
-                    odinType="note";
+                    odinType = "note";
                     JSONObject id = item.optJSONObject("odinNote");
                     if (id != null) {
-                        data[0] = id.optString("subject",   "").toCharArray();
+                        data[0] = id.optString("subject", "").toCharArray();
                         data[1] = id.optString("notes",   "").toCharArray();
-                        System.out.println("Read Note");
-                    } 
+                        if (DEBUG) System.out.println("[ImportExport] Read Note");
+                    }
                 }
 
                 // ===== CARD -> card =====
@@ -1431,7 +1571,7 @@ public class ImportExport {
                     if (card != null) {
                         data[0] = card.optString("cardholderName", "").toCharArray();
                         data[1] = card.optString("number",         "").toCharArray();
-                        // Recombine month/year into single expiry field: MM/YYYY
+                        // ===== Recombine month/year into single expiry field: MM/YYYY =====
                         data[2] = (card.optString("expMonth", "") + "/" +
                                    card.optString("expYear",  "")).toCharArray();
                         data[3] = card.optString("code", "").toCharArray();
@@ -1453,71 +1593,72 @@ public class ImportExport {
                     }
                     data[6] = notes.toCharArray();
                 }
+
                 case ODIN_BINARY -> {
                     odinType = "binary";
                     JSONObject id = item.optJSONObject("odinBinary");
                     if (id != null) {
-
-                        data[0] = id.optString("system",   "").toCharArray();
-                        data[1] = id.optString("username",   "").toCharArray();
-                        data[2] = id.optString("base64",   "").toCharArray();
-                        data[3] = id.optString("filename",   "").toCharArray();
-                        data[4] = id.optString("sha256-file",       "").toCharArray();
-                        data[5] = id.optString("sha256-data",      "").toCharArray();
-                        data[6] = id.optString("notes", "").toCharArray();
+                        data[0] = id.optString("system",      "").toCharArray();
+                        data[1] = id.optString("username",    "").toCharArray();
+                        data[2] = id.optString("base64",      "").toCharArray();
+                        data[3] = id.optString("filename",    "").toCharArray();
+                        data[4] = id.optString("sha256-file", "").toCharArray();
+                        data[5] = id.optString("sha256-data", "").toCharArray();
+                        data[6] = id.optString("notes",       "").toCharArray();
                     }
                 }
+
                 case ODIN_SSH -> {
                     odinType = "ssh";
                     JSONObject id = item.optJSONObject("odinSSH");
                     if (id != null) {
-
                         data[0] = id.optString("hostname",   "").toCharArray();
                         data[1] = id.optString("username",   "").toCharArray();
                         data[2] = id.optString("priv_key",   "").toCharArray();
-                        data[3] = id.optString("pub_key",   "").toCharArray();
-                        data[4] = id.optString("passphrase",       "").toCharArray();
-                        data[5] = id.optString("type",      "").toCharArray();
-                        data[6] = id.optString("notes", "").toCharArray();
+                        data[3] = id.optString("pub_key",    "").toCharArray();
+                        data[4] = id.optString("passphrase", "").toCharArray();
+                        data[5] = id.optString("type",       "").toCharArray();
+                        data[6] = id.optString("notes",      "").toCharArray();
                     }
                 }
+
                 case ODIN_VPN -> {
                     odinType = "vpn";
                     JSONObject id = item.optJSONObject("odinVPN");
                     if (id != null) {
-
-                        data[0] = id.optString("hostname",   "").toCharArray();
-                        data[1] = id.optString("username",   "").toCharArray();
-                        data[2] = id.optString("password-psk",   "").toCharArray();
-                        data[3] = id.optString("config-key",   "").toCharArray();
-                        data[4] = id.optString("protocol",       "").toCharArray();
-                        data[5] = id.optString("port",      "").toCharArray();
-                        data[6] = id.optString("notes", "").toCharArray();
+                        data[0] = id.optString("hostname",    "").toCharArray();
+                        data[1] = id.optString("username",    "").toCharArray();
+                        data[2] = id.optString("password-psk","").toCharArray();
+                        data[3] = id.optString("config-key",  "").toCharArray();
+                        data[4] = id.optString("protocol",    "").toCharArray();
+                        data[5] = id.optString("port",        "").toCharArray();
+                        data[6] = id.optString("notes",       "").toCharArray();
                     }
                 }
+
                 case ODIN_PASSKEY -> {
                     odinType = "passkey";
                     JSONObject id = item.optJSONObject("odinPasskey");
                     if (id != null) {
-
-                        data[0] = id.optString("site",   "").toCharArray();
-                        data[1] = id.optString("username",   "").toCharArray();
+                        data[0] = id.optString("site",      "").toCharArray();
+                        data[1] = id.optString("username",  "").toCharArray();
                         data[2] = id.optString("cred_id",   "").toCharArray();
-                        data[3] = id.optString("priv_key",   "").toCharArray();
-                        data[4] = id.optString("pub_key",       "").toCharArray();
-                        data[5] = id.optString("algorithm",      "").toCharArray();
-                        data[6] = id.optString("notes", "").toCharArray();
+                        data[3] = id.optString("priv_key",  "").toCharArray();
+                        data[4] = id.optString("pub_key",   "").toCharArray();
+                        data[5] = id.optString("algorithm", "").toCharArray();
+                        data[6] = id.optString("notes",     "").toCharArray();
                     }
                 }
+
                 case ODIN_DOCS -> {
                     odinType = "docs";
                     JSONObject id = item.optJSONObject("odinDocs");
                     if (id != null) {
-                        data[0] = id.optString("base64",   "").toCharArray();
-                        data[1] = id.optString("filename",   "").toCharArray();
-                        data[2] = id.optString("sha256-file",       "").toCharArray();
-                        data[3] = id.optString("sha256-data",      "").toCharArray();
-                        data[4] = id.optString("notes", "").toCharArray();
+                        data[0] = id.optString("base64",      "").toCharArray();
+                        data[1] = id.optString("filename",    "").toCharArray();
+                        data[2] = id.optString("sha256-file", "").toCharArray();
+                        data[3] = id.optString("sha256-data", "").toCharArray();
+                        data[4] = id.optString("notes",       "").toCharArray();
                     }
                 }
 
@@ -1590,14 +1731,14 @@ public class ImportExport {
             throws Exception {
 
         byte[] passwordBytes = new String(password).getBytes(StandardCharsets.UTF_8);
-        // Salt = UTF-8 bytes of the base64 STRING - matches Bitwarden's TextEncoder behavior
-        // NOT Base64.getDecoder().decode(saltB64)
+        // ===== Salt = UTF-8 bytes of the base64 STRING - matches Bitwarden's TextEncoder behavior =====
+        // ===== NOT Base64.getDecoder().decode(saltB64) =====
         byte[] saltBytes     = saltB64.getBytes(StandardCharsets.UTF_8);
 
         byte[] masterKey;
         try {
-            // BouncyCastle PKCS5S2 = PBKDF2-HMAC-SHA256 with explicit byte[] control
-            // Java JCE PBEKeySpec(char[]) uses UTF-16BE internally - do not use it here
+            // ===== BouncyCastle PKCS5S2 = PBKDF2-HMAC-SHA256 with explicit byte[] control =====
+            // ===== Java JCE PBEKeySpec(char[]) uses UTF-16BE internally - do not use it here =====
             org.bouncycastle.crypto.generators.PKCS5S2ParametersGenerator gen =
                 new org.bouncycastle.crypto.generators.PKCS5S2ParametersGenerator(
                     new org.bouncycastle.crypto.digests.SHA256Digest());
@@ -1645,7 +1786,7 @@ public class ImportExport {
                 new org.bouncycastle.crypto.digests.SHA256Digest());
         hmac.init(new org.bouncycastle.crypto.params.KeyParameter(prk));
         hmac.update(info, 0, info.length);
-        hmac.update((byte) 0x01); // block counter - must be last per RFC 5869
+        hmac.update((byte) 0x01); // ===== block counter - must be last per RFC 5869 =====
         byte[] out = new byte[hmac.getMacSize()];
         hmac.doFinal(out, 0);
         return Arrays.copyOf(out, length);
@@ -1697,14 +1838,14 @@ public class ImportExport {
      * where the format is always type "2" (CBC).
      */
     private byte[] decryptCbc(String cs, byte[] encKey, byte[] macKey) throws Exception {
-        String body   = cs.substring(cs.indexOf('.') + 1);
+        String   body  = cs.substring(cs.indexOf('.') + 1);
         String[] parts = body.split("\\|");
         if (parts.length < 3) throw new IllegalArgumentException("Invalid CBC CipherString.");
         Base64.Decoder b64 = Base64.getDecoder();
         byte[] iv  = b64.decode(parts[0]);
         byte[] ct  = b64.decode(parts[1]);
         byte[] mac = b64.decode(parts[2]);
-        // Verify MAC before decrypting - constant-time comparison prevents timing attacks
+        // ===== Verify MAC before decrypting - constant-time comparison prevents timing attacks =====
         Mac hmac = Mac.getInstance("HmacSHA256");
         hmac.init(new SecretKeySpec(macKey, "HmacSHA256"));
         hmac.update(iv); hmac.update(ct);
@@ -1736,7 +1877,7 @@ public class ImportExport {
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(encKey, "AES"),
                 new GCMParameterSpec(GCM_TAG_BITS, iv));
-            // GCM verifies auth tag automatically - throws AEADBadTagException on tamper
+            // ===== GCM verifies auth tag automatically - throws AEADBadTagException on tamper =====
             return cipher.doFinal(ctWithTag);
         } else {
             // ===== AES-256-CBC legacy path =====
