@@ -67,7 +67,7 @@ Upon class project completion, the project was compared to Bitwarden, after read
 * **Binary Keys storage** Got RAW binary keys to store and find it hard to store them ease without manual conversion to hex/base64? We can help!
 * **No Master Password Storage:** Master password is never saved, however note that with multi-user mode, there is a encrypted shared vault key.
 * **Multi-User mode** not just one user can login and use the vault (Shared encryption key) (Good for legacy accounts or small business)
-* **Cross-platform support (Windows / Linux / macOS)** Java is cross-platform compatible and this project is devoted to keeping it that way.
+* **Cross-platform support (Windows / Linux / [iPhone/MacOS(Coming Soon)])** Java is cross-platform compatible and this project is devoted to keeping it that way.
 * **Standalone compiled .jar executable**
 * **Encryption:** AES-256-GCM (confidentiality + integrity) (Post Quantum Resistant)
 * **Key Derivation:** Argon2id with random salt (stored in database) 
@@ -115,7 +115,6 @@ Upon class project completion, the project was compared to Bitwarden, after read
     ✅ Ubuntu 20.04/22.04+
     ✅ Linux Mint 20+
     ✅ Redhat
-    ✅ macOS
     ✅ Windows 7/10/11
     ✅ Pretty much anything that can run Java JDK/JRE 17+ (Features may vary)
 
@@ -155,13 +154,15 @@ No external database or installer required, unless you want it.
 
 **[ New Features ]**
 - [X] Multiple item delete
-- [-] "folders": (work started)
+- [X] "folders"
+- [-] Trashcan - deleted items lands here.
 - [ ] Passphrase Generator
 - [ ] "totp":
 
 **[ Big Ticket Items ]**
 - [-] iOS App (work started)
 - [-] MacOS   (work started)
+- [-] Server Sync
 - [ ] Android App
 - [ ] Browser Extension for Firefox and Chrome **(Looking into but maybe not be up to the level of security and privacy worth doing)**
 - [ ] Local encrypted file storage - Store encrypted documents and photos
@@ -358,6 +359,7 @@ C Libraries **Already Baked-in**:
 ---
 ---
 <div align="center"><img width="256" height="256" alt="Image" src="https://github.com/user-attachments/assets/bc63a7e7-5747-49b4-b3c5-f8bd4f4e0cc7" /></div>
+
 ---
 <h1 align="center">Odin Bash Secure Note</h1>
 (bash + zenity + gpg + less + editor{vim|nano})
