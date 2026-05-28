@@ -801,4 +801,225 @@ public class Yggdrasil {
         // Instant.now() captures current UTC time; toString() formats to ISO-8601 with 'Z' suffix
         return Instant.now().toString();
     }
+// ===== MOVE CREDENTIAL TO TRASH =====
+    // ===== Re-encrypts only the folderId field using the EXISTING row IV. =====
+    // ===== Using the same IV is intentional - all other fields stay intact. =====
+    // ===== A fresh IV would require re-encrypting every field in the row. =====
+    protected void moveToTrash(Connection conn, int id) throws Exception {
+        // ===== Fetch the existing IV and current folderId for this row =====
+        String selectSql = "SELECT iv FROM vault WHERE id = ?";
+        byte[] iv;
+        try (PreparedStatement sel = conn.prepareStatement(selectSql)) {
+            sel.setInt(1, id);
+            try (ResultSet rs = sel.executeQuery()) {
+                if (!rs.next()) throw new IllegalStateException("Credential not found: " + id);
+                iv = rs.getBytes("iv");
+            }
+        }
+
+        // ===== Encrypt the trash folderId with the existing IV =====
+        byte[] encTrashId = encryptData(
+            Futhark.TRASH_FOLDER_ID.toCharArray(), iv, Vault_Use_Key);
+
+        // ===== Update only the folderId column - all other columns unchanged =====
+        String updateSql = "UPDATE vault SET folderId = ? WHERE id = ?";
+        try (PreparedStatement upd = conn.prepareStatement(updateSql)) {
+            upd.setBytes(1, encTrashId);
+            upd.setInt(2,   id);
+            upd.executeUpdate();
+        }
+
+        wipeByteArray(encTrashId);
+        if (DEBUG) System.out.println("Moved to trash: " + id);
+    }
+
+    // ===== FOLDER DATA CLASS =====
+    // ===== One Folder instance per row in the folders table. =====
+    // ===== name and desc are decrypted at vault open; folderId is a UUID string. =====
+    protected static class Folder {
+        protected int    id;           // SQLite auto-increment row id
+        protected String folderId;     // UUID string - the logical identifier used in vault rows
+        protected char[] name;         // decrypted folder name - shown in sidebar
+        protected char[] desc;         // decrypted optional description
+        protected byte[] iv;           // IV shared across all encrypted fields in this row
+
+        /**
+         * Wipe plaintext fields - call when evicting from memory.
+         * Encrypted bytes (stored in DB) are not held here; only
+         * decrypted name/desc need wiping on eviction.
+         */
+        protected void wipe() {
+            if (name != null) { Arrays.fill(name, '\0'); name = null; }
+            if (desc != null) { Arrays.fill(desc, '\0'); desc = null; }
+        }
+    }
+
+    // ===== LOAD ALL FOLDERS FROM DB =====
+    // ===== Decrypts name and desc at load time - needed for sidebar and combo box display. =====
+    // ===== Always injects the synthetic Unsorted sentinel at position 0. =====
+    // ===== The sentinel has folderId == Futhark.DEFAULT_FOLDER_ID and no DB row. =====
+    protected List<Folder> loadFolders(Connection conn) throws Exception {
+        List<Folder> result = new ArrayList<>();
+
+        // ===== INJECT UNSORTED SENTINEL - always first, never deleteable =====
+        Folder unsorted   = new Folder();
+        unsorted.id       = -1;
+        unsorted.folderId = Futhark.DEFAULT_FOLDER_ID;
+        unsorted.name     = "Unsorted".toCharArray();
+        unsorted.desc     = new char[0];
+        unsorted.iv       = null;
+        result.add(unsorted);
+
+        // ===== INJECT TRASH SENTINEL - always second, never deleteable or renameable =====
+        Folder trash   = new Folder();
+        trash.id       = -2;
+        trash.folderId = Futhark.TRASH_FOLDER_ID;
+        trash.name     = "Trash".toCharArray();
+        trash.desc     = new char[0];
+        trash.iv       = null;
+        result.add(trash);
+
+        // ===== LOAD REAL FOLDERS FROM DB =====
+        String sql = "SELECT id, folderId, name, desc, iv FROM folders ORDER BY id ASC";
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            while (rs.next()) {
+                Folder f   = new Folder();
+                f.id       = rs.getInt("id");
+                f.iv       = rs.getBytes("iv");
+                // ===== folderId is stored as plain TEXT - it is a UUID, not sensitive =====
+                f.folderId = rs.getString("folderId");
+                // ===== name and desc are encrypted BLOBs - decrypt now =====
+                byte[] encName = rs.getBytes("name");
+                byte[] encDesc = rs.getBytes("desc");
+                f.name = (encName != null) ? decryptData(encName, f.iv) : new char[0];
+                f.desc = (encDesc != null) ? decryptData(encDesc, f.iv) : new char[0];
+                result.add(f);
+            }
+        }
+        return result;
+    }
+
+    // ===== RENAME FOLDER =====
+    // ===== Re-encrypts the name field with a fresh IV, keeps desc unchanged. =====
+    protected void renameFolderInDb(Connection conn, String folderId,
+                                     char[] newName, char[] desc) throws Exception {
+        byte[] iv       = generateIV();
+        byte[] encName  = encryptData(newName, iv, Vault_Use_Key);
+        char[] safeDesc = (desc != null && desc.length > 0) ? desc : new char[]{ ' ' };
+        byte[] encDesc  = encryptData(safeDesc, iv, Vault_Use_Key);
+
+        String sql = "UPDATE folders SET name=?, desc=?, iv=? WHERE folderId=?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setBytes(1,  encName);
+            stmt.setBytes(2,  encDesc);
+            stmt.setBytes(3,  iv);
+            stmt.setString(4, folderId);
+            stmt.executeUpdate();
+        }
+        wipeByteArray(encName);
+        wipeByteArray(encDesc);
+        wipeByteArray(iv);
+        wipeCharArray(newName);
+    }
+
+    // ===== ADD FOLDER =====
+    // ===== Generates a UUID for folderId, encrypts name and desc, inserts into folders table. =====
+    // ===== Returns the generated folderId so the caller can reference it immediately. =====
+    protected String addFolder(Connection conn, char[] name, char[] desc) throws Exception {
+        byte[] iv       = generateIV();
+        // ===== UUID is the logical key used in vault rows - not sensitive, stored as TEXT =====
+        String folderId = GenUUID.generateAsString();
+        byte[] encName  = encryptData(name, iv, Vault_Use_Key);
+        // ===== desc may be empty - encrypt a space rather than null to keep schema consistent =====
+        char[] safeDesc = (desc != null && desc.length > 0) ? desc : new char[]{ ' ' };
+        byte[] encDesc  = encryptData(safeDesc, iv, Vault_Use_Key);
+
+        String sql = "INSERT INTO folders(folderId, name, desc, iv) VALUES(?, ?, ?, ?)";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, folderId);
+            stmt.setBytes(2,  encName);
+            stmt.setBytes(3,  encDesc);
+            stmt.setBytes(4,  iv);
+            stmt.executeUpdate();
+        }
+        // ===== Wipe temporary byte arrays immediately after write =====
+        wipeByteArray(encName);
+        wipeByteArray(encDesc);
+        wipeByteArray(iv);
+        wipeCharArray(name);
+        if (desc != null) wipeCharArray(desc);
+        return folderId;
+    }
+
+    // ===== DELETE FOLDER =====
+    // ===== Reassigns all credentials in the folder to Unsorted (DEFAULT_FOLDER_ID), =====
+    // ===== then deletes the folder row. Each reassigned credential gets a fresh IV =====
+    // ===== since the folderId field is part of the encrypted row. =====
+    protected void deleteFolder(Connection conn, String folderId) throws Exception {
+        if (Futhark.DEFAULT_FOLDER_ID.equals(folderId)) {
+            // ===== Safety guard - Unsorted is a sentinel, never a real DB row =====
+            throw new IllegalArgumentException("Cannot delete the Unsorted sentinel folder.");
+        }
+
+        // ===== FIND ALL CREDENTIALS IN THIS FOLDER AND REASSIGN TO UNSORTED =====
+        String selectSql = "SELECT id, folderId, tag, type, data0, data1, data2, data3, data4, " +
+                           "data5, data6, data7, data8, creationDate, revisionDate, iv FROM vault";
+        try (PreparedStatement sel = conn.prepareStatement(selectSql);
+             ResultSet rs = sel.executeQuery()) {
+            while (rs.next()) {
+                byte[] rowIV          = rs.getBytes("iv");
+                char[] rowFolderId    = decryptData(rs.getBytes("folderId"), rowIV);
+                String rowFolderIdStr = new String(rowFolderId);
+                wipeCharArray(rowFolderId);
+
+                if (!rowFolderIdStr.equals(folderId)) continue; // ===== Not in this folder =====
+
+                // ===== RE-ENCRYPT ROW with fresh IV and default folderId =====
+                byte[] newIV        = generateIV();
+                byte[] encTag       = encryptData(decryptData(rs.getBytes("tag"),          rowIV), newIV, Vault_Use_Key);
+                byte[] encType      = encryptData(decryptData(rs.getBytes("type"),         rowIV), newIV, Vault_Use_Key);
+                byte[] encFolderDef = encryptData(Futhark.DEFAULT_FOLDER_ID.toCharArray(), newIV, Vault_Use_Key);
+                byte[] encCD        = encryptData(decryptData(rs.getBytes("creationDate"), rowIV), newIV, Vault_Use_Key);
+                byte[] encRD        = encryptData(timeCheck_UTC_time().toCharArray(),      newIV, Vault_Use_Key);
+
+                byte[][] encData = new byte[9][];
+                for (int i = 0; i < Futhark.DATA_COLUMNS.length; i++) {
+                    byte[] raw = rs.getBytes(Futhark.DATA_COLUMNS[i]);
+                    if (raw != null) encData[i] = encryptData(decryptData(raw, rowIV), newIV, Vault_Use_Key);
+                }
+
+                String updateSql = "UPDATE vault SET tag=?, data0=?, data1=?, data2=?, data3=?, " +
+                                   "data4=?, data5=?, data6=?, data7=?, data8=?, type=?, " +
+                                   "creationDate=?, revisionDate=?, folderId=?, iv=? WHERE id=?";
+                try (PreparedStatement upd = conn.prepareStatement(updateSql)) {
+                    upd.setBytes(1, encTag);
+                    for (int i = 0; i < 9; i++) upd.setBytes(i + 2, encData[i]);
+                    upd.setBytes(11, encType);
+                    upd.setBytes(12, encCD);
+                    upd.setBytes(13, encRD);
+                    upd.setBytes(14, encFolderDef);
+                    upd.setBytes(15, newIV);
+                    upd.setInt(16,   rs.getInt("id"));
+                    upd.executeUpdate();
+                }
+                // ===== Wipe all temporary arrays for this row =====
+                wipeByteArray(newIV);
+                wipeByteArray(encTag);
+                wipeByteArray(encType);
+                wipeByteArray(encFolderDef);
+                wipeByteArray(encCD);
+                wipeByteArray(encRD);
+                for (byte[] d : encData) wipeByteArray(d);
+            }
+        }
+
+        // ===== DELETE THE FOLDER ROW =====
+        String deleteSql = "DELETE FROM folders WHERE folderId = ?";
+        try (PreparedStatement del = conn.prepareStatement(deleteSql)) {
+            del.setString(1, folderId);
+            del.executeUpdate();
+        }
+        if (DEBUG) System.out.println("Folder deleted and credentials moved to Unsorted: " + folderId);
+    }
 }

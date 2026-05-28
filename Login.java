@@ -205,10 +205,9 @@ public class Login extends JFrame {
         // ===== LOAD ICONS =====
         // Load multiple sizes - OS picks best for taskbar, alt-tab, title bar
         List<Image> icons = new ArrayList<>();
-        String[] iconSizesFolder = {"icons/icon_256.png", "icons/icon_32.png",
-                              "icons/icon_64.png", "icons/icon_16.png"};
+        String[] iconSizesFolder = {"icons/shield/vault-shield2-bg-256.png"};
         
-        String[] iconSizesJar = {"icons/icon_256.png"};
+        String[] iconSizesJar = {"icons/shield/vault-shield2-bg-256.png"};
 
         // Load all available icon sizes into the window icon list
         for (String path : iconSizesJar) {
@@ -229,7 +228,7 @@ public class Login extends JFrame {
 
         // Load the main application icon used for scaled display (e.g. taskbar, title bar)
         if (!notInAJar){
-        URL appIconUrl = getClass().getResource("icons/password_manager_icon58.png");
+        URL appIconUrl = getClass().getResource("icons/shield/vault-shield2-bg-256.png");
         if (appIconUrl != null) {
             Image rawImage = new ImageIcon(appIconUrl).getImage();
             icons.add(rawImage);
@@ -254,7 +253,7 @@ public class Login extends JFrame {
                 if (DEBUG) System.out.println("[Login] Dialog icon not found: " + iconFile.getAbsolutePath());
             }
         }
-        File appiconFile = new File("icons/password_manager_icon58.png");
+        File appiconFile = new File("icons/shield/vault-shield2-bg-256.png");
         if (appiconFile.exists()) {
             icons.add(new ImageIcon(appiconFile.getAbsolutePath()).getImage());
             Image scaled = new ImageIcon(appiconFile.getAbsolutePath()).getImage().getScaledInstance(64, 64, Image.SCALE_SMOOTH);
@@ -364,7 +363,7 @@ public class Login extends JFrame {
             // ===== EXISTING VAULT - show login window on EDT =====
             // start() thread polls behind it while user types
             SwingUtilities.invokeLater(() -> {
-                buildUI(); // ===== Build UI now - conn, vaultPath, DATABASE_TYPE all ready =====
+                buildUI(icons); // ===== Build UI now - conn, vaultPath, DATABASE_TYPE all ready =====
                 setVisible(true);
             });
 
@@ -443,18 +442,19 @@ public class Login extends JFrame {
     }
 
     // ===== BUILD LOGIN UI - called from EDT once conn + vars are ready =====
-    private void buildUI() {
+    private void buildUI(List<Image> icons) {
         setTitle("Odin Runa Login");
         setSize(520, 310);
         setLocationRelativeTo(null);
         setResizable(false);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setIconImages(icons);
 
         // ===== OUTER PANEL =====
         JPanel outer = new JPanel(new BorderLayout());
         outer.setBackground(ThemeManager.BG);
         outer.setBorder(BorderFactory.createLineBorder(ThemeManager.BORDER, 1));
-
+        
         // ===== LEFT PANEL - icon + app name =====
         JPanel leftPanel = new JPanel();
         leftPanel.setBackground(ThemeManager.LEFT_LOGIN);

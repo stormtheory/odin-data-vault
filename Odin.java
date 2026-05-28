@@ -26,6 +26,14 @@ public class Odin {
     private String     currentSearchQuery = "";
     private boolean    suppressSearchListener = false;
 
+// ===== FOLDER FILTER =====
+    // ===== null = no folder filter active (type filter is driving) =====
+    // ===== non-null = folder UUID or Futhark.DEFAULT_FOLDER_ID (Unsorted) =====
+    private String  currentFolderFilter = null;
+    // ===== Buttons shown in search bar when a folder filter is active =====
+    private JButton trashFolderBtn      = null;
+    private JButton renameFolderBtn     = null;
+
 // ===== FIELDS WRITTEN BY Login.finishStartup() - must be public =====
     private static String                binaryPath;
     public String                        DATABASE_TYPE;
@@ -36,6 +44,8 @@ public class Odin {
     public ImageIcon                     dialogIcon   = null;
     public ImageIcon                     appIcon      = null;
     public List<Yggdrasil.Credential>    credentials  = new ArrayList<>();
+    // ===== Loaded at vault open alongside credentials - decrypted name/desc =====
+    public List<Yggdrasil.Folder>        folders      = new ArrayList<>();
     public Yggdrasil                     backend      = new Yggdrasil();
     public int                           PASSWORD_LENGTH;
     public static boolean                DEBUG;
@@ -62,12 +72,33 @@ public class Odin {
 // ===== SIDEBAR FILTER =====
     private String currentTypeFilter = "account"; // ===== Default to accounts view =====
 
+// ===== TOOLBAR BUTTONS - fields so refreshTable can update labels =====
+    private JButton delBtn = null;
+
 // ===== DETAIL PANEL =====
     private JPanel detailPanel;
     private JPanel detailContent;
 
 // ===== MAIN FRAME - needed for toast anchoring =====
     private JFrame mainFrame;
+
+// ===== SIDEBAR PANEL REF - needed to rebuild folder entries after add/delete =====
+    private JPanel         sidebarFolderListPanel   = null;
+    // ===== Scroll pane wrapping the sidebar - needed for mouseExited collapse check =====
+    private JScrollPane    sidebarScrollPane        = null;
+    // ===== Index in sidebar at which folder buttons start - for direct add/remove =====
+    private int            sidebarFolderInsertIndex = 0;
+    // ===== Animation state stored so rebuildFolderListPanel can pass to folder buttons =====
+    private Timer[]        sidebarAnimator          = {null};
+    private int[]          sidebarCurrentWidth      = {44};
+    private int[]          sidebarTargetWidth       = {44};
+    private int            sidebarCollapsedW        = 44;
+    private int            sidebarExpandedW         = 190;
+    private int            sidebarAnimStep          = 12;
+    // ===== Holds label refs for the sidebar slide animation =====
+    private List<JLabel>   sidebarAllLabels         = new ArrayList<>();
+    // ===== The + button in the folder header - shown/hidden with the animation =====
+    private JButton        sidebarAddFolderBtn      = null;
 
 // ======= MAIN ====================
     public static void main(String[] args) throws Exception {
@@ -94,7 +125,7 @@ public class Odin {
         }
 
         // ===== LAUNCH LOGIN on background thread =====
-        // Login owns full startup - EDT must stay free for Swing rendering
+        // ===== Login owns full startup - EDT must stay free for Swing rendering =====
         final String[] finalArgs = args;
         new Thread(() -> {
             try { new Login().start(finalArgs); }
@@ -103,7 +134,7 @@ public class Odin {
     }
 
     // ===== BUILD MAIN UI - called by Login.finishStartup() on EDT =====
-    // public so Login can call it after crypto init and data load complete
+    // ===== public so Login can call it after crypto init and data load complete =====
     public void buildMainUI(List<Image> icons) {
         mainFrame = new JFrame("Odin's Runa");
         mainFrame.setBackground(ThemeManager.BG);
@@ -121,12 +152,22 @@ public class Odin {
             System.err.println("[Odin] Warning: No icons loaded - using default Java icon");
         }
 
+        // ===== LOAD FOLDERS at startup alongside credentials =====
+        try {
+            folders = backend.loadFolders(conn);
+        } catch (Exception e) {
+            e.printStackTrace();
+            // ===== Non-fatal - proceed with empty folder list =====
+            folders = new ArrayList<>();
+        }
+
         // ===== IDLE TIMEOUT =====
         IdleTimeoutManager idleManager = new IdleTimeoutManager(mainFrame, IDLE_TIMEOUT_MINUTES);
         idleManager.start();
 
         // ===== TABLE MODEL =====
-        // Columns set dynamically per type - see refreshTable()
+        // ===== Columns set dynamically per type - see refreshTable() =====
+        // ===== Col 0 = ID (hidden), Col 1 = Type (visible, narrow), Col 2 = Tag, ... =====
         model = new DefaultTableModel(new Object[]{"ID", "Type", "Tag", "Username", "Password"}, 0) {
             public boolean isCellEditable(int row, int col) {
                 return false; // ===== Nothing editable in the table =====
@@ -148,7 +189,7 @@ public class Odin {
         table.setFont(new Font("Segoe UI", Font.PLAIN, 13));
 
         // ===== DOUBLE-CLICK TO COPY =====
-        // Double-clicking any cell copies its decrypted value to clipboard
+        // ===== Double-clicking any cell copies its decrypted value to clipboard =====
         table.addMouseListener(new MouseAdapter() {
             public void mouseClicked(MouseEvent e) {
                 int row = table.rowAtPoint(e.getPoint());
@@ -157,9 +198,9 @@ public class Odin {
                 if (row < 0) return;
 
                 // ===== RESOLVE CREDENTIAL BY DB ID - safe under filter/search =====
-                // model col 0 holds the DB id; find the matching credential by id directly.
-                // Using id-1 or visibleRowToCredentialIndex both break when search is active
-                // because the visible row count no longer matches the full list.
+                // ===== model col 0 holds the DB id; find the matching credential by id directly. =====
+                // ===== Using id-1 or visibleRowToCredentialIndex both break when search is active =====
+                // ===== because the visible row count no longer matches the full list. =====
                 int dbId = (Integer) model.getValueAt(row, 0);
                 int credIndex = findCredentialIndexById(dbId);
                 if (credIndex < 0) return; // ===== Guard: no match found =====
@@ -182,6 +223,12 @@ public class Odin {
         // ===== HIDE ID COLUMN =====
         table.getColumnModel().getColumn(0).setMinWidth(0);
         table.getColumnModel().getColumn(0).setMaxWidth(0);
+
+        // ===== TYPE COLUMN - visible, fixed narrow width =====
+        // ===== Shows the entry type as text (e.g. "account", "note") =====
+        table.getColumnModel().getColumn(1).setMinWidth(72);
+        table.getColumnModel().getColumn(1).setMaxWidth(90);
+        table.getColumnModel().getColumn(1).setPreferredWidth(80);
 
         // ===== SCROLL PANE =====
         JScrollPane scroll = new JScrollPane(table);
@@ -214,26 +261,34 @@ public class Odin {
         center.setBackground(ThemeManager.BG);
         center.add(searchPanel,   BorderLayout.NORTH);
         center.add(verticalSplit, BorderLayout.CENTER);
-        // JPanel center = new JPanel(new BorderLayout());
-        // center.setBackground(ThemeManager.BG);
-        // center.add(verticalSplit, BorderLayout.CENTER);
 
+        // ===== Sidebar wrapped in scroll pane so folder list scrolls when it overflows =====
+        sidebarScrollPane = new JScrollPane(sidebar);
+        sidebarScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        sidebarScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        sidebarScrollPane.setBorder(null);
+        sidebarScrollPane.setViewportBorder(null);
+        sidebarScrollPane.getViewport().setBackground(ThemeManager.SURFACE);
+        sidebarScrollPane.setBackground(ThemeManager.SURFACE);
+        sidebarScrollPane.getVerticalScrollBar().setPreferredSize(new Dimension(4, 0));
+        sidebarScrollPane.getVerticalScrollBar().setBackground(ThemeManager.SURFACE);
+        // ===== Fast scroll - 3 rows per click =====
+        sidebarScrollPane.getVerticalScrollBar().setUnitIncrement(44);
+        sidebarScrollPane.getVerticalScrollBar().setBlockIncrement(132);
 
-
-        // ===== ROOT LAYOUT =====
         JPanel root = new JPanel(new BorderLayout());
         root.setBackground(ThemeManager.BG);
-        root.add(sidebar, BorderLayout.WEST);
-        root.add(center,  BorderLayout.CENTER);
-        root.add(toolbar, BorderLayout.SOUTH);
+        root.add(sidebarScrollPane, BorderLayout.WEST);
+        root.add(center,            BorderLayout.CENTER);
+        root.add(toolbar,           BorderLayout.SOUTH);
 
         mainFrame.setContentPane(root);
         mainFrame.setVisible(true);
     }
 
     // ===== FIND CREDENTIAL INDEX BY DATABASE ID =====
-    // Stable under any filter or search state - matches on id, not position.
-    // Returns -1 if not found.
+    // ===== Stable under any filter or search state - matches on id, not position. =====
+    // ===== Returns -1 if not found. =====
     private int findCredentialIndexById(int id) {
         for (int i = 0; i < credentials.size(); i++) {
             if (credentials.get(i).id == id) return i;
@@ -246,6 +301,7 @@ public class Odin {
      * Builds a centered search field panel rendered above the main table.
      * Filters visible rows by tag column on each keystroke.
      * Placeholder is painted via paintComponent - never touches the document.
+     * Trash button sits to the right of the clear button, visible only during folder filter.
      */
     private JPanel buildSearchBar() {
         JPanel panel = new JPanel(new BorderLayout(0, 0));
@@ -263,7 +319,7 @@ public class Odin {
         iconLabel.setForeground(ThemeManager.TEXT_MUTED);
 
         // ===== PLACEHOLDER TEXTFIELD - paints hint without touching the document =====
-        // paintComponent draws hint text when empty - no setText, no focus listener needed
+        // ===== paintComponent draws hint text when empty - no setText, no focus listener needed =====
         searchField = new JTextField() {
             @Override
             protected void paintComponent(Graphics g) {
@@ -311,8 +367,26 @@ public class Odin {
             suppressSearchListener = false;
             currentSearchQuery = "";
             clearBtn.setVisible(false);
-            refreshTable(); // ===== Call through captured outer instance =====
+            refreshTable();
         });
+
+        // ===== TRASH FOLDER BUTTON =====
+        // ===== Visible only when a real folder filter is active (not a type filter). =====
+        // ===== Painted as a Java2D trash can icon with confirmation dialog on click. =====
+        trashFolderBtn = buildTrashButton();
+        trashFolderBtn.setVisible(false); // ===== Hidden until folder filter is active =====
+
+        // ===== RENAME FOLDER BUTTON =====
+        // ===== Visible alongside trash when a real (non-Unsorted) folder is active. =====
+        renameFolderBtn = new JButton("Rename");
+        renameFolderBtn.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        renameFolderBtn.setForeground(ThemeManager.TEXT_MUTED);
+        renameFolderBtn.setBackground(ThemeManager.SURFACE2);
+        renameFolderBtn.setBorderPainted(false);
+        renameFolderBtn.setFocusPainted(false);
+        renameFolderBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        renameFolderBtn.setVisible(false);
+        renameFolderBtn.addActionListener(e -> renameFolderDialog());
 
         // ===== LIVE FILTER - fires on every keystroke =====
         searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
@@ -321,223 +395,561 @@ public class Odin {
                 if (suppressSearchListener) return;
                 currentSearchQuery = searchField.getText().trim();
                 clearBtn.setVisible(!currentSearchQuery.isEmpty());
-                filterTable(); // ===== Call through captured outer instance =====
+                filterTable();
             }
             public void insertUpdate (javax.swing.event.DocumentEvent e) { update(); }
             public void removeUpdate (javax.swing.event.DocumentEvent e) { update(); }
             public void changedUpdate(javax.swing.event.DocumentEvent e) { update(); }
         });
 
+        // ===== RIGHT SIDE BUTTON PANEL - clear + rename + trash together =====
+        JPanel rightBtns = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 0));
+        rightBtns.setOpaque(false);
+        rightBtns.add(clearBtn);
+        rightBtns.add(renameFolderBtn);
+        rightBtns.add(trashFolderBtn);
+
         inner.add(iconLabel,   BorderLayout.WEST);
         inner.add(searchField, BorderLayout.CENTER);
-        inner.add(clearBtn,    BorderLayout.EAST);
+        inner.add(rightBtns,   BorderLayout.EAST);
 
-        // ===== CENTER the inner panel so it doesn't stretch edge-to-edge =====
         panel.add(inner, BorderLayout.CENTER);
         return panel;
+    }
+
+    // ===== TRASH BUTTON - Java2D painted trash can icon =====
+    // ===== Appears in the search bar only when a folder filter is active. =====
+    private JButton buildTrashButton() {
+        JButton btn = new JButton() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+
+                int w   = getWidth();
+                int h   = getHeight();
+                float s = Math.min(w, h) * 0.7f; // ===== Icon scale within button bounds =====
+                float ox = (w - s) / 2f;           // ===== Center horizontally =====
+                float oy = (h - s) / 2f;           // ===== Center vertically =====
+
+                // ===== Choose color: danger red on hover, muted otherwise =====
+                boolean hovered = getModel().isRollover();
+                Color base = hovered
+                    ? new Color(220, 60, 60, 230)
+                    : new Color(ThemeManager.TEXT_MUTED.getRed(),
+                                ThemeManager.TEXT_MUTED.getGreen(),
+                                ThemeManager.TEXT_MUTED.getBlue(), 180);
+
+                g2.setColor(base);
+                g2.setStroke(new BasicStroke(s * 0.09f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+
+                // ===== Lid - horizontal line at top with small handle bump =====
+                float lidY   = oy + s * 0.22f;
+                float lidX1  = ox + s * 0.08f;
+                float lidX2  = ox + s * 0.92f;
+                float hndW   = s * 0.30f;
+                float hndX   = ox + s * 0.35f;
+                // ===== Handle arc above lid =====
+                g2.draw(new java.awt.geom.Arc2D.Float(
+                    hndX, oy + s * 0.02f, hndW, s * 0.24f, 0, 180,
+                    java.awt.geom.Arc2D.OPEN));
+                // ===== Lid line =====
+                g2.draw(new java.awt.geom.Line2D.Float(lidX1, lidY, lidX2, lidY));
+
+                // ===== Body - trapezoid-ish rounded rectangle =====
+                float bodyX = ox + s * 0.16f;
+                float bodyY = lidY + s * 0.04f;
+                float bodyW = s * 0.68f;
+                float bodyH = s * 0.68f;
+                g2.draw(new java.awt.geom.RoundRectangle2D.Float(bodyX, bodyY, bodyW, bodyH, s * 0.08f, s * 0.08f));
+
+                // ===== Three vertical lines inside body - slat detail =====
+                g2.setStroke(new BasicStroke(s * 0.07f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                float slatTop = bodyY + bodyH * 0.14f;
+                float slatBot = bodyY + bodyH * 0.82f;
+                for (int i = 0; i < 3; i++) {
+                    float sx = bodyX + bodyW * (0.25f + i * 0.25f);
+                    g2.draw(new java.awt.geom.Line2D.Float(sx, slatTop, sx, slatBot));
+                }
+
+                g2.dispose();
+            }
+        };
+        btn.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        btn.setBackground(ThemeManager.SURFACE2);
+        btn.setBorderPainted(false);
+        btn.setFocusPainted(false);
+        btn.setContentAreaFilled(false);
+        btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        btn.setPreferredSize(new Dimension(34, 34));
+        btn.setToolTipText("Delete this folder");
+
+        btn.addActionListener(e -> deleteFolderWithConfirmation());
+        return btn;
+    }
+
+    // ===== DELETE FOLDER WITH CONFIRMATION =====
+    // ===== Called when user clicks the trash button in the search bar. =====
+    // ===== Moves all credentials to Unsorted, then removes the folder. =====
+    private void deleteFolderWithConfirmation() {
+        if (currentFolderFilter == null) return;
+        if (Futhark.DEFAULT_FOLDER_ID.equals(currentFolderFilter)) return;
+        if (Futhark.TRASH_FOLDER_ID.equals(currentFolderFilter))   return; // ===== Trash is undeletable =====
+
+        // ===== Find folder name for the confirmation message =====
+        String folderName = "this folder";
+        for (Yggdrasil.Folder f : folders) {
+            if (f.folderId.equals(currentFolderFilter)) {
+                folderName = new String(f.name);
+                break;
+            }
+        }
+
+        int confirm = ThemeManager.showThemedConfirm(mainFrame,
+            "Delete folder \"" + folderName + "\"?\n" +
+            "All secrets inside will be moved to Unsorted.",
+            "Confirm Delete Folder");
+
+        if (confirm != JOptionPane.YES_OPTION) return;
+
+        try {
+            backend.deleteFolder(conn, currentFolderFilter);
+            // ===== Reload both folders and credentials after deletion =====
+            folders     = backend.loadFolders(conn);
+            credentials = backend.loadAll(conn);
+            // ===== Clear folder filter - return to normal type view =====
+            currentFolderFilter = null;
+            if (trashFolderBtn  != null) trashFolderBtn.setVisible(false);
+            if (renameFolderBtn != null) renameFolderBtn.setVisible(false);
+            // ===== Rebuild the folder section in the sidebar =====
+            rebuildFolderListPanel();
+            refreshTable();
+            ToastManager.success(mainFrame, "Folder deleted. Secrets moved to Unsorted.");
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            ToastManager.error(mainFrame, "Failed to delete folder.");
+        }
+    }
+
+    // ===== RENAME FOLDER DIALOG =====
+    // ===== Pre-fills the current folder name; updates DB and rebuilds sidebar on confirm. =====
+    private void renameFolderDialog() {
+        if (currentFolderFilter == null) return;
+        if (Futhark.DEFAULT_FOLDER_ID.equals(currentFolderFilter)) return;
+        if (Futhark.TRASH_FOLDER_ID.equals(currentFolderFilter))   return; // ===== Trash is not renameable =====
+
+        // ===== Find the current folder name to pre-fill =====
+        String currentName = "";
+        for (Yggdrasil.Folder f : folders) {
+            if (f.folderId.equals(currentFolderFilter)) {
+                currentName = f.name != null ? new String(f.name) : "";
+                break;
+            }
+        }
+
+        JTextField nameField = new JTextField(currentName, 20);
+        nameField.setBackground(ThemeManager.SURFACE2);
+        nameField.setForeground(ThemeManager.TEXT);
+        nameField.setCaretColor(ThemeManager.ACCENT);
+        // ===== Select all so user can type immediately =====
+        nameField.selectAll();
+
+        JButton btnSave   = new JButton("Save");
+        JButton btnCancel = new JButton("Cancel");
+        ThemeManager.styleAccentButton(btnSave);
+        ThemeManager.styleSurfaceButton(btnCancel);
+
+        JOptionPane pane = new JOptionPane(
+            new Object[]{ "New Folder Name:", nameField },
+            JOptionPane.PLAIN_MESSAGE, JOptionPane.DEFAULT_OPTION,
+            dialogIcon, new Object[]{ btnSave, btnCancel }, null);
+        JDialog dlg = pane.createDialog(mainFrame, "Rename Folder");
+        dlg.setModal(true);
+        dlg.setMinimumSize(new Dimension(320, 140));
+
+        final boolean[] confirmed = { false };
+        btnCancel.addActionListener(e -> dlg.dispose());
+        btnSave.addActionListener(e -> { confirmed[0] = true; dlg.dispose(); });
+        // ===== Enter key submits =====
+        nameField.addActionListener(e -> { confirmed[0] = true; dlg.dispose(); });
+        dlg.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+        dlg.setVisible(true);
+
+        if (!confirmed[0]) return;
+
+        String newName = nameField.getText().trim();
+        if (newName.isEmpty()) {
+            ToastManager.error(mainFrame, "Folder name cannot be empty.");
+            return;
+        }
+
+        try {
+            // ===== Update the folder name in the DB =====
+            String folderIdToRename = currentFolderFilter;
+            // ===== Find the folder's existing desc and iv to re-encrypt with new name =====
+            for (Yggdrasil.Folder f : folders) {
+                if (f.folderId.equals(folderIdToRename)) {
+                    char[] descChars = (f.desc != null && f.desc.length > 0)
+                        ? f.desc : new char[]{ ' ' };
+                    backend.renameFolderInDb(conn, folderIdToRename,
+                        newName.toCharArray(), descChars);
+                    break;
+                }
+            }
+            folders = backend.loadFolders(conn);
+            rebuildFolderListPanel();
+            ToastManager.success(mainFrame, "Folder renamed to \"" + newName + "\".");
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            ToastManager.error(mainFrame, "Failed to rename folder.");
+        }
     }
 
     // ===== FILTER TABLE BY TAG =====
     /**
      * Rebuilds the table showing only credentials whose tag contains the search query.
+     * Respects both currentTypeFilter and currentFolderFilter.
      * Case-insensitive. Falls back to full refreshTable() when query is empty.
      * Does NOT mutate the credentials list - purely a display filter.
      */
     private void filterTable() {
-        // ===== Empty query - show everything for the current type =====
+        // ===== Empty query - show everything for the current filter =====
         if (currentSearchQuery == null || currentSearchQuery.isEmpty()) {
             refreshTable();
             return;
         }
 
         String query = currentSearchQuery.toLowerCase();
-        Futhark.EntryType type = Futhark.forKey(currentTypeFilter);
+        Futhark.EntryType type = currentFolderFilter != null
+            ? null // ===== Folder mode: show all types, no single-type header =====
+            : Futhark.forKey(currentTypeFilter);
 
-        // ===== REBUILD COLUMN HEADERS - same as refreshTable() =====
-        String[] headers = Futhark.tableHeaders(type);
+        // ===== REBUILD COLUMN HEADERS =====
+        String[] headers = buildFolderModeHeaders(type);
         model.setColumnCount(0);
         model.setRowCount(0);
         for (String h : headers) model.addColumn(h);
-
-        // ===== HIDE ID COLUMN =====
-        if (!DEBUG) {
-            if (table.getColumnModel().getColumnCount() > 0) {
-                table.getColumnModel().getColumn(0).setMinWidth(0);
-                table.getColumnModel().getColumn(0).setMaxWidth(0);
-            }
-        }
-        // ===== HIDE TYPE COLUMN =====
-        if (table.getColumnModel().getColumnCount() > 1) {
-            table.getColumnModel().getColumn(1).setMinWidth(0);
-            table.getColumnModel().getColumn(1).setMaxWidth(0);
-        }
+        applyColumnWidths();
 
         // ===== POPULATE ONLY MATCHING ROWS =====
         for (Yggdrasil.Credential c : credentials) {
-            if (!currentTypeFilter.equals(c.type)) continue;
+            if (!passesActiveFilter(c)) continue;
 
             // ===== TAG MATCH - case-insensitive substring search =====
             String tag = new String(c.tag).toLowerCase();
             if (!tag.contains(query)) continue; // ===== Skip non-matching rows =====
 
-            Object[] rowData = new Object[headers.length];
-            rowData[0] = c.id;
-            rowData[1] = (type != null ? type.icon : "") + " " + currentTypeFilter;
-            rowData[2] = new String(c.tag);
-
-            if (type != null) {
-                for (int i = 0; i < type.tableColumnIndices.length && (i + 3) < headers.length; i++) {
-                    int           fieldIdx = type.tableColumnIndices[i];
-                    Futhark.Field field    = type.fields.get(fieldIdx);
-                    if (field.sensitive || field.password) {
-                        rowData[i + 3] = "••••••••"; // ===== Never show sensitive data in table =====
-                    } else {
-                        byte[] enc = c.getDataField(fieldIdx);
-                        if (enc != null) {
-                            try {
-                                if (DEBUG) System.out.println("Decrypt for Show - Wipe Memory Space after");
-                                char[] val = backend.decryptData(enc, c.iv);
-                                rowData[i + 3] = new String(val);
-                                Yggdrasil.wipeCharArray(val);
-                            } catch (Exception e) {
-                                rowData[i + 3] = "[error]";
-                            }
-                        }
-                    }
-                }
-            }
-            model.addRow(rowData);
+            model.addRow(buildRowData(c, headers.length));
         }
     }
 
     // ===== SIDEBAR =====
     /**
-     * Retractable sidebar.
-     * Collapsed: icon-only strip (44px).
-     * Expanded: full labels (164px) - animated slide on hover.
+     * Fixed-width sidebar. No hover animation - always expanded.
+     * Folders section scrollable when overflow occurs.
      */
     private JPanel buildSidebar() {
-        JPanel sidebar = new JPanel() {
-            {
-                setBackground(ThemeManager.SURFACE);
-                setPreferredSize(new Dimension(44, 0)); // ===== Starts collapsed =====
-                setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, ThemeManager.BORDER));
-            }
-        };
+        JPanel sidebar = new JPanel();
         sidebar.setLayout(new BoxLayout(sidebar, BoxLayout.Y_AXIS));
+        sidebar.setBackground(ThemeManager.SURFACE);
+        sidebar.setMinimumSize(new Dimension(sidebarExpandedW, 0));
+        sidebar.setMaximumSize(new Dimension(sidebarExpandedW, Integer.MAX_VALUE));
+        sidebar.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, ThemeManager.BORDER));
 
-        // ===== SIDEBAR ENTRIES - all 7 types =====
+        // ===== SIDEBAR ENTRIES - all entry types =====
         String[][] entries = {
-            {"Accounts",     "account"},
-            {"Notes",        "note"},
-            {"Addresses",    "address"},
-            {"Cards",        "card"},
-            {"Passkeys",     "passkey"},
-            {"SSH Keys",     "ssh"},
-            {"VPN Keys",     "vpn"},
-            {"Binary Keys",  "binary"},
+            {"Accounts",       "account"},
+            {"Notes",          "note"},
+            {"Addresses",      "address"},
+            {"Cards",          "card"},
+            {"Passkeys",       "passkey"},
+            {"SSH Keys",       "ssh"},
+            {"VPN Keys",       "vpn"},
+            {"Binary Keys",    "binary"},
             {"Docs/Pictures",  "docs"},
         };
 
-        // ===== ANIMATION STATE =====
-        int[]     targetWidth  = {44};
-        int[]     currentWidth = {44};
-        Timer[]   animator     = {null};
-        int COLLAPSED_W = 44;
-        int EXPANDED_W  = 164;
-        int ANIM_STEP   = 12; // ===== Pixels per frame =====
-
-        List<JLabel> labelRefs = new ArrayList<>();
+        sidebarAllLabels = new ArrayList<>();
 
         sidebar.add(Box.createVerticalStrut(12));
 
+        // ===== TYPE ENTRY BUTTONS =====
         for (String[] entry : entries) {
             String label   = entry[0];
             String typeKey = entry[1];
 
-            JPanel btn = new JPanel(new BorderLayout(6, 0));
-            btn.setBackground(ThemeManager.SURFACE);
-            btn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 44));
-            btn.setBorder(BorderFactory.createEmptyBorder(6, 10, 6, 8));
-            btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-
-            // ===== ICON - pure Java2D, no image files needed =====
-            JLabel iconLabel = new JLabel(SidebarIcon.forType(typeKey, 20));
-            iconLabel.setPreferredSize(new Dimension(24, 24));
-
-            JLabel textLabel = new JLabel(label);
-            textLabel.setFont(new Font("Segoe UI", Font.PLAIN, 13));
-            textLabel.setForeground(ThemeManager.TEXT);
-            textLabel.setVisible(false); // ===== Hidden when collapsed =====
-            labelRefs.add(textLabel);
-
-            btn.add(iconLabel, BorderLayout.WEST);
-            btn.add(textLabel, BorderLayout.CENTER);
-
-            btn.addMouseListener(new MouseAdapter() {
-                // ===== CLICK - switch category =====
-                public void mouseClicked(MouseEvent e) {
-                    currentTypeFilter = typeKey;
-                    if (DEBUG) System.out.println("Sidebar Click");
-                    for (Component c : sidebar.getComponents()) {
-                        if (c instanceof JPanel p && p != sidebar)
-                            p.setBackground(ThemeManager.SURFACE);
-                    }
-                    btn.setBackground(ThemeManager.SELECT);
-                    refreshTable();
-                }
-
-                // ===== HOVER - expand sidebar =====
-                public void mouseEntered(MouseEvent e) {
-                    targetWidth[0] = EXPANDED_W;
-                    startSidebarAnim(sidebar, animator, currentWidth, targetWidth,
-                                     ANIM_STEP, labelRefs, COLLAPSED_W);
-                }
-            });
-
+            JPanel btn = buildSidebarTypeButton(label, typeKey, sidebar);
             sidebar.add(btn);
             sidebar.add(Box.createVerticalStrut(2));
         }
 
-        sidebar.add(Box.createVerticalGlue());
+        // ===== FOLDERS SECTION HEADER with + button =====
+        sidebar.add(Box.createVerticalStrut(8));
+        JPanel folderHeader = buildFolderSectionHeader(sidebar);
+        sidebar.add(folderHeader);
+        sidebar.add(Box.createVerticalStrut(2));
 
-        // ===== COLLAPSE ON MOUSE EXIT =====
-        sidebar.addMouseListener(new MouseAdapter() {
-            public void mouseExited(MouseEvent e) {
-                if (!sidebar.getBounds().contains(
-                        SwingUtilities.convertPoint(sidebar, e.getPoint(), sidebar.getParent()))) {
-                    targetWidth[0] = COLLAPSED_W;
-                    startSidebarAnim(sidebar, animator, currentWidth, targetWidth,
-                                     ANIM_STEP, labelRefs, COLLAPSED_W);
-                }
-            }
-        });
+        // ===== TRASH - fixed sentinel entry, always present, not part of folder list =====
+        sidebar.add(buildTrashSidebarButton(sidebar));
+        sidebar.add(Box.createVerticalStrut(2));
+
+        // ===== FOLDER BUTTONS go directly into sidebar - no intermediate panel =====
+        sidebarFolderListPanel    = sidebar;
+        sidebarFolderInsertIndex  = sidebar.getComponentCount();
+
+        // ===== Glue and folder buttons added by rebuildFolderListPanel() =====
+        rebuildFolderListPanel();
+
+        // ===== Expand/collapse handled at scroll pane level in buildMainUI() =====
 
         return sidebar;
     }
 
-    /**
-     * Drives the sidebar slide animation.
-     * Reuses the existing timer if already running - avoids stacking timers.
-     */
-    private void startSidebarAnim(JPanel sidebar, Timer[] animRef, int[] current,
-                                   int[] target, int step, List<JLabel> labels, int collapsedW) {
-        if (animRef[0] != null) animRef[0].stop();
-        animRef[0] = new Timer(12, e -> {
-            int diff = target[0] - current[0];
-            if (Math.abs(diff) <= step) {
-                current[0] = target[0];
-                ((Timer) e.getSource()).stop();
-            } else {
-                current[0] += (diff > 0 ? step : -step);
+    // ===== BUILD A SINGLE TYPE BUTTON FOR THE SIDEBAR =====
+    // ===== Extracted to keep buildSidebar() readable. =====
+    // ===== BUILD A SINGLE TYPE BUTTON FOR THE SIDEBAR =====
+    private JPanel buildSidebarTypeButton(String label, String typeKey, JPanel sidebar) {
+        JPanel btn = new JPanel(new BorderLayout(6, 0));
+        btn.setBackground(ThemeManager.SURFACE);
+        btn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 44));
+        btn.setBorder(BorderFactory.createEmptyBorder(6, 10, 6, 8));
+        btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        JLabel iconLabel = new JLabel(SidebarIcon.forType(typeKey, 20));
+        iconLabel.setPreferredSize(new Dimension(24, 24));
+
+        JLabel textLabel = new JLabel(label);
+        textLabel.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+        textLabel.setForeground(ThemeManager.TEXT);
+        sidebarAllLabels.add(textLabel);
+
+        btn.add(iconLabel, BorderLayout.WEST);
+        btn.add(textLabel, BorderLayout.CENTER);
+
+        btn.addMouseListener(new MouseAdapter() {
+            public void mouseClicked(MouseEvent e) {
+                currentTypeFilter   = typeKey;
+                currentFolderFilter = null;
+                if (trashFolderBtn  != null) trashFolderBtn.setVisible(false);
+                if (renameFolderBtn != null) renameFolderBtn.setVisible(false);
+                clearSidebarSelections(sidebar);
+                btn.setBackground(ThemeManager.SELECT);
+                refreshTable();
             }
-            sidebar.setPreferredSize(new Dimension(current[0], 0));
-            boolean showLabels = current[0] > collapsedW + 30;
-            for (JLabel lbl : labels) lbl.setVisible(showLabels);
-            sidebar.revalidate();
-            sidebar.repaint();
         });
-        animRef[0].start();
+
+        return btn;
+    }
+
+    // ===== FOLDERS SECTION HEADER =====
+    private JPanel buildFolderSectionHeader(JPanel sidebar) {
+        JPanel header = new JPanel(new BorderLayout(6, 0));
+        header.setBackground(ThemeManager.SURFACE);
+        header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+        header.setBorder(BorderFactory.createEmptyBorder(2, 10, 2, 8));
+
+        JLabel fIcon = new JLabel(SidebarIcon.forType("folder", 16));
+        fIcon.setPreferredSize(new Dimension(24, 24));
+
+        JLabel fLabel = new JLabel("FOLDERS  +");
+        fLabel.setFont(new Font("Segoe UI", Font.BOLD, 10));
+        fLabel.setForeground(ThemeManager.TEXT_MUTED);
+        fLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        sidebarAllLabels.add(fLabel);
+        sidebarAddFolderBtn = null;
+
+        header.add(fIcon,  BorderLayout.WEST);
+        header.add(fLabel, BorderLayout.CENTER);
+
+        header.addMouseListener(new MouseAdapter() {
+            public void mouseClicked(MouseEvent e) {
+                showAddFolderDialog(sidebar);
+            }
+        });
+
+        return header;
+    }
+
+    // ===== TRASH SIDEBAR BUTTON =====
+    // ===== Fixed entry - always present, never deleteable or renameable. =====
+    // ===== Uses the recycling symbol icon. =====
+    private JPanel buildTrashSidebarButton(JPanel sidebar) {
+        JPanel btn = new JPanel(new BorderLayout(6, 0));
+        btn.setBackground(ThemeManager.SURFACE);
+        btn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 38));
+        btn.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 8));
+        btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        JLabel iconLbl = new JLabel(SidebarIcon.forType("trash", 16));
+        iconLbl.setPreferredSize(new Dimension(24, 24));
+
+        JLabel textLbl = new JLabel("Trash");
+        textLbl.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        textLbl.setForeground(ThemeManager.TEXT_MUTED);
+        sidebarAllLabels.add(textLbl);
+
+        btn.add(iconLbl, BorderLayout.WEST);
+        btn.add(textLbl, BorderLayout.CENTER);
+
+        btn.addMouseListener(new MouseAdapter() {
+            public void mouseClicked(MouseEvent e) {
+                currentFolderFilter = Futhark.TRASH_FOLDER_ID;
+                // ===== Trash is a sentinel - no rename or folder-delete buttons =====
+                if (trashFolderBtn  != null) trashFolderBtn.setVisible(false);
+                if (renameFolderBtn != null) renameFolderBtn.setVisible(false);
+                clearSidebarSelections(sidebar);
+                btn.setBackground(ThemeManager.SELECT);
+                refreshTable();
+            }
+        });
+
+        return btn;
+    }
+    // ===== Called at startup and after any folder add/delete. =====
+    // ===== Clears the panel and repopulates from the current folders list. =====
+    private void rebuildFolderListPanel() {
+        if (sidebarFolderListPanel == null) return;
+        JPanel sidebar = sidebarFolderListPanel; // ===== Points to the actual sidebar =====
+
+        // ===== REMOVE all components from sidebarFolderInsertIndex onward =====
+        // ===== (everything after the folder header strut is a folder button or strut) =====
+        // ===== Work backwards so indices stay valid =====
+        int total = sidebar.getComponentCount();
+        for (int i = total - 1; i >= sidebarFolderInsertIndex; i--) {
+            sidebar.remove(i);
+        }
+
+        // ===== Trim folder labels from animation list - keep only fixed entries =====
+        // ===== 9 type labels + 1 FOLDERS header label = 10 fixed entries =====
+        int fixedLabelCount = 10;
+        while (sidebarAllLabels.size() > fixedLabelCount) {
+            sidebarAllLabels.remove(sidebarAllLabels.size() - 1);
+        }
+
+        // ===== ADD folder buttons directly to sidebar =====
+        for (Yggdrasil.Folder folder : folders) {
+            JPanel folderBtn = buildFolderButton(folder, sidebar);
+            sidebar.add(folderBtn);
+            sidebar.add(Box.createVerticalStrut(2));
+        }
+
+        // ===== No vertical glue - content must overflow naturally for scrollbar to appear =====
+
+        sidebar.revalidate();
+        sidebar.repaint();
+    }
+
+    private JPanel buildFolderButton(Yggdrasil.Folder folder, JPanel sidebar) {
+        String folderName = (folder.name != null && folder.name.length > 0)
+            ? new String(folder.name) : "Unnamed";
+        boolean isUnsorted = Futhark.DEFAULT_FOLDER_ID.equals(folder.folderId);
+
+        JPanel btn = new JPanel(new BorderLayout(6, 0));
+        btn.setBackground(ThemeManager.SURFACE);
+        btn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 38));
+        btn.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 8));
+        btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        JLabel iconLbl = new JLabel(SidebarIcon.forType("folder", 16));
+        iconLbl.setPreferredSize(new Dimension(24, 24));
+
+        JLabel textLbl = new JLabel(folderName);
+        textLbl.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        textLbl.setForeground(isUnsorted ? ThemeManager.TEXT_MUTED : ThemeManager.TEXT);
+        sidebarAllLabels.add(textLbl);
+
+        btn.add(iconLbl, BorderLayout.WEST);
+        btn.add(textLbl, BorderLayout.CENTER);
+
+        btn.addMouseListener(new MouseAdapter() {
+            public void mouseClicked(MouseEvent e) {
+                currentFolderFilter = folder.folderId;
+                if (trashFolderBtn  != null) trashFolderBtn.setVisible(!isUnsorted);
+                if (renameFolderBtn != null) renameFolderBtn.setVisible(!isUnsorted);
+                if (DEBUG) System.out.println("Folder clicked: " + folder.folderId);
+                clearSidebarSelections(sidebarFolderListPanel);
+                btn.setBackground(ThemeManager.SELECT);
+                refreshTable();
+            }
+        });
+
+        return btn;
+    }
+
+    // ===== CLEAR ALL SIDEBAR BUTTON HIGHLIGHTS =====
+    // ===== Folder buttons are direct sidebar children so one loop covers everything =====
+    private void clearSidebarSelections(JPanel sidebar) {
+        if (sidebar == null) return;
+        for (Component c : sidebar.getComponents()) {
+            if (c instanceof JPanel p) p.setBackground(ThemeManager.SURFACE);
+        }
+    }
+
+    // ===== SHOW ADD FOLDER DIALOG =====
+    // ===== Simple dialog: name field (required) + optional description. =====
+    private void showAddFolderDialog(JPanel sidebar) {
+        JTextField nameField = new JTextField(20);
+        nameField.setBackground(ThemeManager.SURFACE2);
+        nameField.setForeground(ThemeManager.TEXT);
+        nameField.setCaretColor(ThemeManager.ACCENT);
+
+        JTextArea descField = new JTextArea(3, 20);
+        descField.setBackground(ThemeManager.SURFACE2);
+        descField.setForeground(ThemeManager.TEXT);
+        descField.setCaretColor(ThemeManager.ACCENT);
+        descField.setLineWrap(true);
+        descField.setWrapStyleWord(true);
+        JScrollPane descScroll = new JScrollPane(descField);
+        descScroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, 72));
+
+        JButton btnCreate = new JButton("Create Folder");
+        JButton btnCancel = new JButton("Cancel");
+        ThemeManager.styleAccentButton(btnCreate);
+        ThemeManager.styleSurfaceButton(btnCancel);
+
+        Object[] msg = {
+            "Folder Name:", nameField,
+            "Description (optional):", descScroll
+        };
+
+        JOptionPane pane = new JOptionPane(msg, JOptionPane.PLAIN_MESSAGE,
+            JOptionPane.DEFAULT_OPTION, dialogIcon,
+            new Object[]{ btnCreate, btnCancel }, null);
+        JDialog dlg = pane.createDialog(mainFrame, "New Folder");
+        dlg.setModal(true);
+        dlg.setMinimumSize(new Dimension(360, 200));
+
+        final boolean[] confirmed = { false };
+        btnCancel.addActionListener(e -> dlg.dispose());
+        btnCreate.addActionListener(e -> { confirmed[0] = true; dlg.dispose(); });
+        // ===== Enter in the name field submits the dialog =====
+        nameField.addActionListener(e -> { confirmed[0] = true; dlg.dispose(); });
+        dlg.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+        dlg.setVisible(true);
+
+        if (!confirmed[0]) return;
+
+        String name = nameField.getText().trim();
+        if (name.isEmpty()) {
+            ToastManager.error(mainFrame, "Folder name cannot be empty.");
+            return;
+        }
+
+        try {
+            String desc = descField.getText().trim();
+            backend.addFolder(conn,
+                name.toCharArray(),
+                desc.isEmpty() ? new char[0] : desc.toCharArray());
+            // ===== Reload folders and rebuild sidebar section =====
+            folders = backend.loadFolders(conn);
+            rebuildFolderListPanel();
+            ToastManager.success(mainFrame, "Folder \"" + name + "\" created.");
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            ToastManager.error(mainFrame, "Failed to create folder.");
+        }
     }
 
     // ===== BOTTOM TOOLBAR =====
@@ -546,9 +958,9 @@ public class Odin {
         panel.setBackground(ThemeManager.SURFACE);
         panel.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, ThemeManager.BORDER));
 
-        JButton addBtn              = new JButton("＋ Add Secret");
-        JButton delBtn              = new JButton("🗑 Delete Selected");
-        JButton updateBtn           = new JButton("Update");
+        JButton addBtn     = new JButton("＋ Add Secret");
+        delBtn             = new JButton("🗑 Move to Trash");
+        JButton updateBtn  = new JButton("Update");
         JButton accountBtn = new JButton("🔐 Account: " + username);
 
         ThemeManager.styleAccentButton(addBtn);
@@ -556,10 +968,9 @@ public class Odin {
         ThemeManager.styleDangerButton(delBtn);
         ThemeManager.styleSurfaceButton(accountBtn);
 
-        addBtn.addActionListener(e              -> addUpdateEntry("add"));
-        updateBtn.addActionListener(e           -> addUpdateEntry("update"));
-        delBtn.addActionListener(e              -> deleteEntry());
-        //changeMasterPassBtn.addActionListener(e -> changeMasterPass(username));
+        addBtn.addActionListener(e    -> addUpdateEntry("add"));
+        updateBtn.addActionListener(e -> addUpdateEntry("update"));
+        delBtn.addActionListener(e    -> deleteEntry());
 
         accountBtn.addActionListener(e -> {
             AccountManagement aM = new AccountManagement(backend, conn, DATABASE_TYPE, username, VaultLevel, DATABASE_TYPE, PASSWORD_LENGTH, DEBUG);
@@ -639,9 +1050,8 @@ public class Odin {
      * Sensitive fields show with a Show/Hide button that decrypts on demand.
      */
     private void showDetailPanel(int credIndex) {
-    if (credIndex < 0 || credIndex >= credentials.size()) return;
+        if (credIndex < 0 || credIndex >= credentials.size()) return;
 
-        //int credIndex = visibleRowToCredentialIndex(row);
         if (credIndex < 0) return;
 
         Yggdrasil.Credential c    = credentials.get(credIndex);
@@ -676,12 +1086,12 @@ public class Odin {
                     detailContent.add(sep);
                     detailContent.add(Box.createVerticalStrut(6));
                     if (field.sensitive || field.password) {
-                        if (type.typeKey.equals("docs")||type.typeKey.equals("binary")){
+                        if (type.typeKey.equals("docs") || type.typeKey.equals("binary")) {
                             Yggdrasil.Credential fieldRefs = c;
                             byte[] data;
-                            if (type.typeKey.equals("binary")) {data = fieldRefs.getDataField(3);} else {data = fieldRefs.getDataField(1);}
+                            if (type.typeKey.equals("binary")) { data = fieldRefs.getDataField(3); } else { data = fieldRefs.getDataField(1); }
                             addDetailSensitiveField(field.label, encBytes, c.iv, credIndex, i, type.typeKey, false, data);
-                            } else {addDetailSensitiveField(field.label, encBytes, c.iv, credIndex, i, type.typeKey, false, null);}
+                        } else { addDetailSensitiveField(field.label, encBytes, c.iv, credIndex, i, type.typeKey, false, null); }
                     } else {
                         try {
                             char[] value = backend.decryptData(encBytes, c.iv);
@@ -692,12 +1102,12 @@ public class Odin {
                     }
                 } else if (field.sensitive || field.password) {
                     // ===== SENSITIVE FIELD - masked with Show/Hide button =====
-                    if (type.typeKey.equals("docs")||type.typeKey.equals("binary")){
+                    if (type.typeKey.equals("docs") || type.typeKey.equals("binary")) {
                         Yggdrasil.Credential fieldRefs = c;
                         byte[] data;
-                        if (type.typeKey.equals("binary")) {data = fieldRefs.getDataField(3);} else {data = fieldRefs.getDataField(1);}
+                        if (type.typeKey.equals("binary")) { data = fieldRefs.getDataField(3); } else { data = fieldRefs.getDataField(1); }
                         addDetailSensitiveField(field.label, encBytes, c.iv, credIndex, i, type.typeKey, false, data);
-                        } else {addDetailSensitiveField(field.label, encBytes, c.iv, credIndex, i, type.typeKey, false, null);}
+                    } else { addDetailSensitiveField(field.label, encBytes, c.iv, credIndex, i, type.typeKey, false, null); }
                 } else {
                     // ===== PLAIN FIELD - decrypt and show directly =====
                     try {
@@ -711,11 +1121,29 @@ public class Odin {
                 }
             }
         }
-        //detailContent.add(Box.createVerticalStrut(6));
+
+        // ===== FOLDER NAME in detail panel =====
+        String folderDisplay = resolveFolderName(c.folderId);
+        addDetailField("Folder", folderDisplay, false, credIndex, -1);
+
         addDetailField("Revision", c.revisionDate, false, credIndex, -1);
         addDetailField("Creation", c.creationDate, false, credIndex, -1);
         detailContent.revalidate();
         detailContent.repaint();
+    }
+
+    // ===== RESOLVE FOLDER NAME FROM FOLDER ID =====
+    // ===== Looks up the decrypted folder name for display in the detail panel. =====
+    private String resolveFolderName(String folderId) {
+        if (folderId == null || folderId.isBlank() || folderId.equals(Futhark.DEFAULT_FOLDER_ID)) {
+            return "Unsorted";
+        }
+        for (Yggdrasil.Folder f : folders) {
+            if (f.folderId.equals(folderId)) {
+                return f.name != null ? new String(f.name) : "Unnamed";
+            }
+        }
+        return "Unsorted"; // ===== Fallback if folder was deleted =====
     }
 
     /** Adds a plain (non-sensitive) field row to the detail panel. */
@@ -765,7 +1193,7 @@ public class Odin {
     }
 
     /** Adds a sensitive field row to the detail panel with a Show/Hide button. */
-    private void addDetailSensitiveField(String label, byte[] encBytes, byte[] iv,int row, int fieldIdx, String keytype, boolean multiline, byte[] data) {
+    private void addDetailSensitiveField(String label, byte[] encBytes, byte[] iv, int row, int fieldIdx, String keytype, boolean multiline, byte[] data) {
         JPanel fieldRow = new JPanel(new BorderLayout(8, 0));
         fieldRow.setBackground(ThemeManager.SURFACE);
         fieldRow.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -811,9 +1239,7 @@ public class Odin {
         exportBtn.setFont(new Font("Segoe UI", Font.PLAIN, 11));
         ThemeManager.styleSurfaceButton(exportBtn);
         exportBtn.setPreferredSize(new Dimension(80, 24));
-        exportBtn.addActionListener(e -> {
-            exportBinaryFunction(encBytes, iv, data);
-        });
+        exportBtn.addActionListener(e -> exportBinaryFunction(encBytes, iv, data));
 
         JButton viewBtn = new JButton("👁 View");
         viewBtn.setFont(new Font("Segoe UI", Font.PLAIN, 11));
@@ -830,16 +1256,15 @@ public class Odin {
                 Yggdrasil.wipeCharArray(base64Chars);
 
                 // ===== Get filename from credential for magic byte detection =====
-                // Find the credential that owns this field by scanning credentials
-                String filename = "unknown";
+                String filename   = "unknown";
                 byte[] encFilename = data;
-                    if (encFilename != null) {
-                        try {
-                            char[] fn = backend.decryptData(encFilename, iv);
-                            filename = new String(fn);
-                            Yggdrasil.wipeCharArray(fn);
-                        } catch (Exception ignored) {}
-                    }
+                if (encFilename != null) {
+                    try {
+                        char[] fn = backend.decryptData(encFilename, iv);
+                        filename = new String(fn);
+                        Yggdrasil.wipeCharArray(fn);
+                    } catch (Exception ignored) {}
+                }
 
                 // ===== Detect file type from magic bytes + filename =====
                 BinaryViewer.DetectedType fileType = BinaryViewer.detect(
@@ -848,9 +1273,10 @@ public class Odin {
                 );
 
                 // ===== Open viewer dialog =====
-                final byte[] decodedFinal = decoded;
-                final String filenameFinal = filename;
-                SwingUtilities.invokeLater(() -> BinaryViewer.showViewerDialog(mainFrame, decodedFinal, fileType, filenameFinal));
+                final byte[] decodedFinal   = decoded;
+                final String filenameFinal  = filename;
+                SwingUtilities.invokeLater(() ->
+                    BinaryViewer.showViewerDialog(mainFrame, decodedFinal, fileType, filenameFinal));
 
             } catch (Exception ex) {
                 ex.printStackTrace();
@@ -858,9 +1284,8 @@ public class Odin {
             }
         });
 
-
         // ===== SHOW / HIDE TOGGLE =====
-        // Auto-masks after 30s if user forgets to click Hide
+        // ===== Auto-masks after 30s if user forgets to click Hide =====
         JButton  showHideBtn  = new JButton("👁 Show");
         showHideBtn.setFont(new Font("Segoe UI", Font.PLAIN, 11));
         ThemeManager.styleSurfaceButton(showHideBtn);
@@ -902,9 +1327,9 @@ public class Odin {
 
         JPanel actionBtns = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 0));
         actionBtns.setOpaque(false);
-        if (keytype.equals("docs") && label.equals("Base64"))actionBtns.add(viewBtn);
-        if (label.equals("Base64"))actionBtns.add(exportBtn);
-        if (!keytype.equals("docs"))actionBtns.add(showHideBtn);
+        if (keytype.equals("docs") && label.equals("Base64")) actionBtns.add(viewBtn);
+        if (label.equals("Base64"))                           actionBtns.add(exportBtn);
+        if (!keytype.equals("docs"))                          actionBtns.add(showHideBtn);
         actionBtns.add(copyClipBtn);
 
         fieldRow.add(lbl,        BorderLayout.WEST);
@@ -918,7 +1343,7 @@ public class Odin {
     protected void exportBinaryFunction(byte[] encBytes, byte[] iv, byte[] data) {
         try {
             base64Encoded = backend.decryptData(encBytes, iv);
-        } catch (Exception e) { e.printStackTrace();}
+        } catch (Exception e) { e.printStackTrace(); }
 
         if (base64Encoded == null || base64Encoded.toString().isEmpty()) {
             JOptionPane.showMessageDialog(null,
@@ -928,34 +1353,28 @@ public class Odin {
             return;
         }
 
-        // Ask user where to save the exported file
         JFileChooser fc = new JFileChooser();
-
         for (Component comp : fc.getComponents()) {
-                ThemeManager.themeFileChooserComponents(comp);
-            }
-            
+            ThemeManager.themeFileChooserComponents(comp);
+        }
+
         // ===== Get filename from credential for magic byte detection =====
-                // Find the credential that owns this field by scanning credentials
-                String filename = "unknown";
-                byte[] encFilename = data;
-                    if (encFilename != null) {
-                        try {
-                            char[] fn = backend.decryptData(encFilename, iv);
-                            filename = new String(fn);
-                            Yggdrasil.wipeCharArray(fn);
-                        } catch (Exception ignored) {}
-                    }
-        if (filename != null && !filename.isEmpty()) {fc.setSelectedFile(new java.io.File(filename));}
-        
+        String filename   = "unknown";
+        byte[] encFilename = data;
+        if (encFilename != null) {
+            try {
+                char[] fn = backend.decryptData(encFilename, iv);
+                filename = new String(fn);
+                Yggdrasil.wipeCharArray(fn);
+            } catch (Exception ignored) {}
+        }
+        if (filename != null && !filename.isEmpty()) { fc.setSelectedFile(new java.io.File(filename)); }
+
         int result = fc.showSaveDialog(fc);
-        
-        // Bail out if user cancelled the dialog
         if (result != JFileChooser.APPROVE_OPTION) return;
 
         Path outputPath = fc.getSelectedFile().toPath();
 
-        // Warn before overwriting an existing file
         if (Files.exists(outputPath)) {
             int confirm = JOptionPane.showConfirmDialog(null,
                 "File already exists. Overwrite?",
@@ -966,11 +1385,9 @@ public class Odin {
         }
 
         try {
-            // Decode Base64 back to raw binary bytes
             byte[] fileBytes = Base64.getDecoder().decode(new String(base64Encoded));
-
             try {
-                // Verify integrity before writing: re-hash and compare to stored hash
+                // ===== Verify integrity before writing: re-hash and compare to stored hash =====
                 String recomputedHash = SHA256Util.hashBytes(fileBytes);
                 if (shasumData != null && !SHA256Util.verifyHash(shasumData, recomputedHash)) {
                     JOptionPane.showMessageDialog(null,
@@ -980,10 +1397,9 @@ public class Odin {
                     return;
                 }
 
-                // Write raw bytes to the chosen output path
                 Files.write(outputPath, fileBytes);
 
-                // Verify the written file matches the original file hash
+                // ===== Verify the written file matches the original file hash =====
                 String writtenHash = SHA256Util.hashFile(outputPath);
                 if (shasumFile != null && !SHA256Util.verifyHash(shasumFile, writtenHash)) {
                     JOptionPane.showMessageDialog(null,
@@ -999,11 +1415,10 @@ public class Odin {
                     JOptionPane.INFORMATION_MESSAGE);
 
             } finally {
-                // Wipe raw bytes from memory immediately after writing
+                // ===== Wipe raw bytes from memory immediately after writing =====
                 Arrays.fill(fileBytes, (byte) 0);
                 ToastManager.show(mainFrame, filename + " exported", ToastManager.ToastType.SUCCESS, 10_000);
             }
-
         } catch (IOException ex) {
             throw new UncheckedIOException("Failed to export file: " + outputPath, ex);
         }
@@ -1052,49 +1467,74 @@ public class Odin {
         }
     }
 
-    // ===== REFRESH TABLE =====
-    /**
-     * Rebuilds the table model for the currently selected entry type.
-     * Sensitive fields always show as bullets in the table.
-     */
-    private void refreshTable() {
-        Futhark.EntryType type = Futhark.forKey(currentTypeFilter);
-        if (DEBUG) System.out.println("refreshTable()    Filter: " + currentTypeFilter);
+    // ===== PASSES ACTIVE FILTER =====
+    // ===== Returns true if the credential should appear given the current =====
+    // ===== folder filter or type filter, whichever is active. =====
+    private boolean passesActiveFilter(Yggdrasil.Credential c) {
+        String credFolder = (c.folderId == null || c.folderId.isBlank())
+            ? Futhark.DEFAULT_FOLDER_ID
+            : c.folderId;
 
-        currentSearchQuery = ""; // Clear search when switching categories, one of my favorites
-        updateSearchPlaceholder();
+        if (currentFolderFilter != null) {
+            // ===== Folder mode: match folderId exactly =====
+            return credFolder.equals(currentFolderFilter);
+        } else {
+            // ===== Type mode: match entry type AND exclude trash =====
+            if (Futhark.TRASH_FOLDER_ID.equals(credFolder)) return false;
+            return currentTypeFilter.equals(c.type);
+        }
+    }
 
-        // ===== REBUILD COLUMN HEADERS =====
-        String[] headers = Futhark.tableHeaders(type);
-        model.setColumnCount(0);
-        model.setRowCount(0);
-        for (String h : headers) model.addColumn(h);
+    // ===== BUILD FOLDER-MODE COLUMN HEADERS =====
+    // ===== When a folder filter is active, we show all types so =====
+    // ===== we use a generic header set: ID, Type, Tag, Value. =====
+    // ===== When a type filter is active, we use the normal per-type headers. =====
+    private String[] buildFolderModeHeaders(Futhark.EntryType type) {
+        if (currentFolderFilter != null) {
+            // ===== Generic 4-column layout for mixed-type folder view =====
+            return new String[]{"ID", "Type", "Tag", "Value"};
+        }
+        return Futhark.tableHeaders(type);
+    }
 
-        // ===== HIDE ID COLUMN =====
-        if (!DEBUG) {
-            if (table.getColumnModel().getColumnCount() > 0) {
-                table.getColumnModel().getColumn(0).setMinWidth(0);
-                table.getColumnModel().getColumn(0).setMaxWidth(0);
+    // ===== BUILD ROW DATA =====
+    // ===== Fills a row array for the given credential using the active filter context. =====
+    private Object[] buildRowData(Yggdrasil.Credential c, int colCount) {
+        Object[] rowData = new Object[colCount];
+        rowData[0] = c.id;
+
+        Futhark.EntryType type = Futhark.forKey(c.type);
+
+        // ===== Col 1: type name (short, visible) =====
+        rowData[1] = c.type;
+
+        // ===== Col 2: tag =====
+        rowData[2] = new String(c.tag);
+
+        if (currentFolderFilter != null) {
+            // ===== Folder mode: col 3 = first non-sensitive, non-tag visible field =====
+            if (type != null && type.tableColumnIndices.length > 0) {
+                int      fieldIdx = type.tableColumnIndices[0];
+                Futhark.Field field = type.fields.get(fieldIdx);
+                if (field.sensitive || field.password) {
+                    rowData[3] = "••••••••";
+                } else {
+                    byte[] enc = c.getDataField(fieldIdx);
+                    if (enc != null) {
+                        try {
+                            char[] val = backend.decryptData(enc, c.iv);
+                            rowData[3] = new String(val);
+                            Yggdrasil.wipeCharArray(val);
+                        } catch (Exception e) {
+                            rowData[3] = "[error]";
+                        }
+                    }
+                }
             }
-        
-        // ===== HIDE TYPE COLUMN =====
-        if (table.getColumnModel().getColumnCount() > 1) {
-            table.getColumnModel().getColumn(1).setMinWidth(0);
-            table.getColumnModel().getColumn(1).setMaxWidth(0);
-        }
-        }
-
-        // ===== POPULATE ROWS =====
-        for (Yggdrasil.Credential c : credentials) {
-            if (!currentTypeFilter.equals(c.type)) continue;
-
-            Object[] rowData = new Object[headers.length];
-            rowData[0] = c.id;
-            rowData[1] = (type != null ? type.icon : "") + " " + currentTypeFilter;
-            rowData[2] = new String(c.tag);
-
+        } else {
+            // ===== Type mode: fill per-type extra columns =====
             if (type != null) {
-                for (int i = 0; i < type.tableColumnIndices.length && (i + 3) < headers.length; i++) {
+                for (int i = 0; i < type.tableColumnIndices.length && (i + 3) < colCount; i++) {
                     int           fieldIdx = type.tableColumnIndices[i];
                     Futhark.Field field    = type.fields.get(fieldIdx);
                     if (field.sensitive || field.password) {
@@ -1114,7 +1554,70 @@ public class Odin {
                     }
                 }
             }
-            model.addRow(rowData);
+        }
+        return rowData;
+    }
+
+    // ===== APPLY COLUMN WIDTHS after model rebuild =====
+    // ===== Always hides ID col 0. =====
+    // ===== Type col 1: visible and narrow in folder mode only. =====
+    // ===== In type mode all rows share the same type so the column is hidden. =====
+    private void applyColumnWidths() {
+        if (table.getColumnModel().getColumnCount() < 1) return;
+        // ===== Hide ID column always =====
+        if (!DEBUG) {
+            table.getColumnModel().getColumn(0).setMinWidth(0);
+            table.getColumnModel().getColumn(0).setMaxWidth(0);
+        }
+        if (table.getColumnModel().getColumnCount() > 1) {
+            if (currentFolderFilter != null) {
+                // ===== Folder mode: Type column is useful - show it narrow =====
+                table.getColumnModel().getColumn(1).setMinWidth(72);
+                table.getColumnModel().getColumn(1).setMaxWidth(90);
+                table.getColumnModel().getColumn(1).setPreferredWidth(80);
+            } else {
+                // ===== Type mode: redundant column - hide it =====
+                table.getColumnModel().getColumn(1).setMinWidth(0);
+                table.getColumnModel().getColumn(1).setMaxWidth(0);
+            }
+        }
+    }
+
+    // ===== REFRESH TABLE =====
+    /**
+     * Rebuilds the table model for the currently active filter.
+     * In type mode: shows only credentials matching currentTypeFilter.
+     * In folder mode: shows all credentials in currentFolderFilter, all types.
+     * Sensitive fields always show as bullets in the table.
+     */
+    private void refreshTable() {
+        Futhark.EntryType type = currentFolderFilter != null
+            ? null
+            : Futhark.forKey(currentTypeFilter);
+
+        if (DEBUG) System.out.println("refreshTable()  typeFilter=" + currentTypeFilter + "  folderFilter=" + currentFolderFilter);
+
+        // ===== Update delete button label based on context =====
+        if (delBtn != null) {
+            boolean inTrash = Futhark.TRASH_FOLDER_ID.equals(currentFolderFilter);
+            delBtn.setText(inTrash ? "🗑 Delete Permanently" : "🗑 Move to Trash");
+        }
+
+        // ===== Clear search when switching categories =====
+        currentSearchQuery = "";
+        updateSearchPlaceholder();
+
+        // ===== REBUILD COLUMN HEADERS =====
+        String[] headers = buildFolderModeHeaders(type);
+        model.setColumnCount(0);
+        model.setRowCount(0);
+        for (String h : headers) model.addColumn(h);
+        applyColumnWidths();
+
+        // ===== POPULATE ROWS =====
+        for (Yggdrasil.Credential c : credentials) {
+            if (!passesActiveFilter(c)) continue;
+            model.addRow(buildRowData(c, headers.length));
         }
     }
 
@@ -1125,7 +1628,6 @@ public class Odin {
      */
     private void copyFieldToClipboard(int credIndex, int col) {
         try {
-            //int credIndex = visibleRowToCredentialIndex(row);
             if (credIndex < 0) return;
 
             Yggdrasil.Credential c    = credentials.get(credIndex);
@@ -1203,14 +1705,49 @@ public class Odin {
             typeBox.setSelectedIndex(Futhark.allTypes().indexOf(preSelected));
         }
 
-        if (mode.equals("update")) { typeBox.setVisible(false); 
-            
-        }
+        if (mode.equals("update")) { typeBox.setVisible(false); }
 
         JTextField tagField = new JTextField();
         tagField.setBackground(ThemeManager.SURFACE2);
         tagField.setForeground(ThemeManager.TEXT);
         tagField.setCaretColor(ThemeManager.ACCENT);
+
+        // ===== FOLDER SELECTOR COMBO BOX =====
+        // ===== Populated from the current folders list; pre-selects Unsorted by default =====
+        JComboBox<String> folderBox = new JComboBox<>();
+        // ===== Map from display index to folderId for resolution after dialog closes =====
+        List<String> folderIdList = new ArrayList<>();
+        int          folderPreSelectIdx = 0;
+        String       credExistingFolderId = Futhark.DEFAULT_FOLDER_ID;
+
+        // ===== If updating, find the current credential's folderId for pre-selection =====
+        if (mode.equals("update")) {
+            int row = table.getSelectedRow();
+            if (row >= 0) {
+                int credIndex = findCredentialIndexById((int) model.getValueAt(row, 0));
+                if (credIndex >= 0) {
+                    credExistingFolderId = credentials.get(credIndex).folderId;
+                    if (credExistingFolderId == null || credExistingFolderId.isBlank()) {
+                        credExistingFolderId = Futhark.DEFAULT_FOLDER_ID;
+                    }
+                }
+            }
+        } else if (currentFolderFilter != null) {
+            // ===== If adding while in a folder view, pre-select that folder =====
+            credExistingFolderId = currentFolderFilter;
+        }
+
+        for (int fi = 0; fi < folders.size(); fi++) {
+            Yggdrasil.Folder f = folders.get(fi);
+            // ===== Trash is not a valid assignment target - skip it =====
+            if (Futhark.TRASH_FOLDER_ID.equals(f.folderId)) continue;
+            folderBox.addItem(f.name != null ? new String(f.name) : "Unnamed");
+            folderIdList.add(f.folderId);
+            if (f.folderId.equals(credExistingFolderId)) folderPreSelectIdx = folderIdList.size() - 1;
+        }
+        if (!folderIdList.isEmpty()) folderBox.setSelectedIndex(folderPreSelectIdx);
+        folderBox.setBackground(ThemeManager.SURFACE2);
+        folderBox.setForeground(ThemeManager.TEXT);
 
         CardLayout cards    = new CardLayout();
         JPanel     cardPanel = new JPanel(cards);
@@ -1236,8 +1773,8 @@ public class Odin {
 
                 JComponent input;
                 if (field.sensitive && field.multiline) {
-                    // ===== Multline SENSITIVE FIELD + eye toggle =====
-                    // for fields like Notes; SSHKeys; Passkeys; VPNKeys
+                    // ===== Multiline SENSITIVE FIELD + eye toggle =====
+                    // ===== For fields like Notes; SSHKeys; Passkeys; VPNKeys =====
                     JTextArea ta = new JTextArea(6, 20); // 6 visible rows for large data entry
                     ta.setBackground(ThemeManager.SURFACE2);
                     ta.setForeground(ThemeManager.TEXT);
@@ -1260,13 +1797,12 @@ public class Odin {
                     taRow.setBackground(ThemeManager.SURFACE2);
                     taRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 160));
                     taRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-                    taRow.add(taScroll, BorderLayout.CENTER); // scroll pane goes in, not raw ta
+                    taRow.add(taScroll, BorderLayout.CENTER);
 
                     // ===== Used for value extraction - read ta.getText() directly =====
                     taRow.putClientProperty("sensitiveField", ta);
-
                     input = taRow;
-                    
+
                 } else if (field.multiline) {
                     JTextArea ta = new JTextArea(3, 20);
                     ta.setBackground(ThemeManager.SURFACE2);
@@ -1274,17 +1810,17 @@ public class Odin {
                     ta.setLineWrap(true);
                     ta.setWrapStyleWord(true);
                     ta.setAlignmentX(Component.LEFT_ALIGNMENT);
-                    if (!field.editable)ta.setEnabled(false);
+                    if (!field.editable) ta.setEnabled(false);
                     input = new JScrollPane(ta);
                     ((JScrollPane) input).setAlignmentX(Component.LEFT_ALIGNMENT);
                     ((JScrollPane) input).setMaximumSize(new Dimension(Integer.MAX_VALUE, 72));
-                
+
                 } else if (field.sensitive || field.password) {
-                        final JPasswordField pf = new JPasswordField();
-                        pf.setBackground(ThemeManager.SURFACE2);
-                        pf.setForeground(ThemeManager.TEXT);
-                        pf.setCaretColor(ThemeManager.ACCENT);
-                        pf.setAlignmentX(Component.LEFT_ALIGNMENT);                  
+                    final JPasswordField pf = new JPasswordField();
+                    pf.setBackground(ThemeManager.SURFACE2);
+                    pf.setForeground(ThemeManager.TEXT);
+                    pf.setCaretColor(ThemeManager.ACCENT);
+                    pf.setAlignmentX(Component.LEFT_ALIGNMENT);
 
                     // ===== PASSWORD EYE TOGGLE BUTTON =====
                     JButton eyeBtn = new JButton("👁");
@@ -1293,7 +1829,7 @@ public class Odin {
                     eyeBtn.setPreferredSize(new Dimension(34, 26));
                     eyeBtn.setFocusPainted(false);
                     eyeBtn.setBorderPainted(false);
-                    if (!field.editable)eyeBtn.setBackground(ThemeManager.BORDER);
+                    if (!field.editable) eyeBtn.setBackground(ThemeManager.BORDER);
                     eyeBtn.setForeground(ThemeManager.TEXT_MUTED);
                     eyeBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
                     boolean[] pwVisible = {false};
@@ -1310,25 +1846,23 @@ public class Odin {
                     pfRow.add(pf,     BorderLayout.CENTER);
                     pfRow.add(eyeBtn, BorderLayout.EAST);
                     pfRow.putClientProperty("passwordField", pf); // ===== Used for value extraction =====
-                    if (!field.password && !field.editable)pf.setEnabled(false);
+                    if (!field.password && !field.editable) pf.setEnabled(false);
                     input = pfRow;
-                    
 
-                        if (field.password) {
-                            final JPasswordField pfRef = pf; 
-                            final Thor.StrengthBarPanel fieldStrengthBar = field.password ? new Thor.StrengthBarPanel() : null;
+                    if (field.password) {
+                        final JPasswordField pfRef = pf;
+                        final Thor.StrengthBarPanel fieldStrengthBar = new Thor.StrengthBarPanel();
+                        pfRef.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+                            void upd() {
+                                if (fieldStrengthBar != null) fieldStrengthBar.updateFromField(pfRef);
+                            }
+                            public void insertUpdate (javax.swing.event.DocumentEvent e) { upd(); }
+                            public void removeUpdate (javax.swing.event.DocumentEvent e) { upd(); }
+                            public void changedUpdate(javax.swing.event.DocumentEvent e) { upd(); }
+                        });
+                        pfRow.putClientProperty("strengthBar", fieldStrengthBar);
+                    }
 
-                            pfRef.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-                                void upd() {
-                                    // ===== Guard: sensitive-only fields have no bar =====
-                                    if (fieldStrengthBar != null) fieldStrengthBar.updateFromField(pfRef);
-                                }
-                                public void insertUpdate (javax.swing.event.DocumentEvent e) { upd(); }
-                                public void removeUpdate (javax.swing.event.DocumentEvent e) { upd(); }
-                                public void changedUpdate(javax.swing.event.DocumentEvent e) { upd(); }
-                            });
-                            pfRow.putClientProperty("strengthBar", fieldStrengthBar);
-                        }
                 } else {
                     JTextField tf = new JTextField();
                     tf.setBackground(ThemeManager.SURFACE2);
@@ -1336,79 +1870,81 @@ public class Odin {
                     tf.setCaretColor(ThemeManager.ACCENT);
                     tf.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
                     tf.setAlignmentX(Component.LEFT_ALIGNMENT);
-                    if (!field.editable)tf.setEnabled(false);
-                    if (!field.editable)tf.setBackground(ThemeManager.BORDER);
+                    if (!field.editable) tf.setEnabled(false);
+                    if (!field.editable) tf.setBackground(ThemeManager.BORDER);
                     input = tf;
                 }
 
-            typePanel.add(fLabel);
-            typePanel.add(Box.createVerticalStrut(2));
-            typePanel.add(input);
-            typePanel.add(Box.createVerticalStrut(6));
-            inputs.add(input);
+                typePanel.add(fLabel);
+                typePanel.add(Box.createVerticalStrut(2));
+                typePanel.add(input);
+                typePanel.add(Box.createVerticalStrut(6));
+                inputs.add(input);
 
-            if (field.label.equals("Base64")) {
-                JPanel importRow = buildImportRow(inputs, t);
-                JPanel importWrapper = new JPanel(new BorderLayout());
+                if (field.label.equals("Base64")) {
+                    JPanel importRow = buildImportRow(inputs, t);
+                    JPanel importWrapper = new JPanel(new BorderLayout());
                     importWrapper.setBackground(ThemeManager.BG);
                     importWrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
                     importWrapper.setPreferredSize(new Dimension(0, 30));
-                    importWrapper.setMinimumSize(new Dimension(0, 30)); // ===== All three needed to lock height =====
+                    importWrapper.setMinimumSize(new Dimension(0, 30));
                     importWrapper.setAlignmentX(Component.LEFT_ALIGNMENT);
                     importWrapper.add(importRow, BorderLayout.CENTER);
-
                     typePanel.add(importWrapper);
                     typePanel.add(Box.createVerticalStrut(3));
-            }
-            if (field.password) {
-                Thor.StrengthBarPanel fieldStrengthBar = (Thor.StrengthBarPanel) ((JPanel) input).getClientProperty("strengthBar");
-                        JPanel genRow = buildGeneratorRow(inputs, t);
-                        JPanel genWrapper = new JPanel(new BorderLayout());
-                        genWrapper.setBackground(ThemeManager.BG);
-                        genWrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
-                        genWrapper.setPreferredSize(new Dimension(0, 30));
-                        genWrapper.setMinimumSize(new Dimension(0, 30)); // ===== All three needed to lock height =====
-                        genWrapper.setAlignmentX(Component.LEFT_ALIGNMENT);
-                        genWrapper.add(genRow, BorderLayout.CENTER);
+                }
 
-                        // ===== Wrap strength bar in fixed-height panel to prevent BoxLayout stretching =====
-                        JPanel barWrapper = new JPanel(new BorderLayout());
-                        barWrapper.setBackground(ThemeManager.BG);
-                        barWrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
-                        barWrapper.setPreferredSize(new Dimension(0, 20));
-                        barWrapper.setMinimumSize(new Dimension(0, 20)); // ===== All three needed to lock height =====
-                        barWrapper.setAlignmentX(Component.LEFT_ALIGNMENT);
-                        barWrapper.add(fieldStrengthBar, BorderLayout.CENTER);
+                if (field.password) {
+                    Thor.StrengthBarPanel fieldStrengthBar = (Thor.StrengthBarPanel) ((JPanel) input).getClientProperty("strengthBar");
+                    JPanel genRow = buildGeneratorRow(inputs, t);
+                    JPanel genWrapper = new JPanel(new BorderLayout());
+                    genWrapper.setBackground(ThemeManager.BG);
+                    genWrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+                    genWrapper.setPreferredSize(new Dimension(0, 30));
+                    genWrapper.setMinimumSize(new Dimension(0, 30));
+                    genWrapper.setAlignmentX(Component.LEFT_ALIGNMENT);
+                    genWrapper.add(genRow, BorderLayout.CENTER);
 
-                        typePanel.add(genWrapper);
-                        typePanel.add(Box.createVerticalStrut(3));
-                        typePanel.add(barWrapper);
-                        typePanel.add(Box.createVerticalStrut(3));
+                    JPanel barWrapper = new JPanel(new BorderLayout());
+                    barWrapper.setBackground(ThemeManager.BG);
+                    barWrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
+                    barWrapper.setPreferredSize(new Dimension(0, 20));
+                    barWrapper.setMinimumSize(new Dimension(0, 20));
+                    barWrapper.setAlignmentX(Component.LEFT_ALIGNMENT);
+                    barWrapper.add(fieldStrengthBar, BorderLayout.CENTER);
+
+                    typePanel.add(genWrapper);
+                    typePanel.add(Box.createVerticalStrut(3));
+                    typePanel.add(barWrapper);
+                    typePanel.add(Box.createVerticalStrut(3));
+                }
             }
-            
-            }
+
             cardPanel.add(typePanel, t.typeKey);
             fieldMap.put(t.typeKey, inputs);
 
-        if (mode.equals("update")) {
+            if (mode.equals("update")) {
                 typeBox.setVisible(false);
                 // ===== PRE-POPULATE FIELDS from existing credential =====
-                int credIndex = visibleRowToCredentialIndex(table.getSelectedRow());
+                // ===== Use findCredentialIndexById - safe under search and folder filter =====
+                int selectedRow = table.getSelectedRow();
+                int credIndex = selectedRow >= 0
+                    ? findCredentialIndexById((int) model.getValueAt(selectedRow, 0))
+                    : -1;
                 if (credIndex >= 0) {
-                    Yggdrasil.Credential c        = credentials.get(credIndex);
-                    Futhark.EntryType    type     = Futhark.forKey(c.type);
+                    Yggdrasil.Credential c    = credentials.get(credIndex);
+                    Futhark.EntryType    type = Futhark.forKey(c.type);
                     creationDate = c.creationDate;
 
                     // ===== TAG - always present =====
                     tagField.setText(new String(c.tag));
 
                     if (type != null) {
-                        // ===== Renamed to existingInputs to avoid conflict with card-builder loop var =====
                         List<JComponent> existingInputs = fieldMap.get(type.typeKey);
                         if (existingInputs != null) {
                             for (int i = 0; i < type.fields.size() && i < existingInputs.size(); i++) {
                                 byte[] encBytes = c.getDataField(i);
-                                if (encBytes == null) continue; // ===== Skip unpopulated fields =====
+                                if (encBytes == null) continue;
                                 try {
                                     char[]     value = backend.decryptData(encBytes, c.iv);
                                     JComponent comp  = existingInputs.get(i);
@@ -1432,23 +1968,21 @@ public class Odin {
                                         tf.setText(new String(value));
                                         if (!f.editable) tf.setEnabled(false);
                                     } else if (comp instanceof JScrollPane sp &&
-                                            sp.getViewport().getView() instanceof JTextArea ta) {
+                                               sp.getViewport().getView() instanceof JTextArea ta) {
                                         ta.setEnabled(true);
                                         ta.setText(new String(value));
                                         if (!f.editable) ta.setEnabled(false);
                                     }
-
                                     Yggdrasil.wipeCharArray(value); // ===== Wipe after filling field =====
-
                                 } catch (Exception e) {
                                     if (DEBUG) System.out.println("Pre-populate failed field " + i + ": " + e);
                                 }
                             }
                         }
                     }
-                }   
                 }
             }
+        }
 
         typeBox.addActionListener(e -> {
             int idx = typeBox.getSelectedIndex();
@@ -1458,7 +1992,13 @@ public class Odin {
 
         if (preSelected != null) cards.show(cardPanel, preSelected.typeKey);
 
-        Object[]  message   = { "Entry Type:", typeBox, "Tag / Label:", tagField, cardPanel };
+        // ===== FOLDER LABEL for dialog =====
+        JLabel folderLabel = new JLabel("Folder:");
+        folderLabel.setForeground(ThemeManager.TEXT_MUTED);
+        folderLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+
+        Object[]  message   = { "Entry Type:", typeBox, "Tag / Label:", tagField,
+                                 folderLabel, folderBox, cardPanel };
         JButton   btnAdd    = new JButton(mode.equals("update") ? "Update" : "Add Entry");
         JButton   btnCancel = new JButton("Cancel");
         ThemeManager.styleAccentButton(btnAdd);
@@ -1490,8 +2030,8 @@ public class Odin {
                 for (int i = 0; i < inputs.size() && i < dataFields.length; i++) {
                     JComponent comp = inputs.get(i);
                     if (comp instanceof JPanel wrapper) {
-                        Object sfProp = wrapper.getClientProperty("sensitiveField"); // ===== multiline sensitive =====
-                        Object pfProp = wrapper.getClientProperty("passwordField");  // ===== single-line password =====
+                        Object sfProp = wrapper.getClientProperty("sensitiveField");
+                        Object pfProp = wrapper.getClientProperty("passwordField");
                         if (sfProp instanceof JTextArea ta) {
                             dataFields[i] = ta.getText().toCharArray();
                         } else if (pfProp instanceof JPasswordField pf) {
@@ -1507,13 +2047,21 @@ public class Odin {
                         dataFields[i] = ta.getText().toCharArray();
                     }
                 }
-                
-                String folderId=" "; // PlaceHolders
+
+                // ===== RESOLVE SELECTED FOLDER ID from combo box selection =====
+                int    selectedFolderIdx = folderBox.getSelectedIndex();
+                String selectedFolderId  = (selectedFolderIdx >= 0 && selectedFolderIdx < folderIdList.size())
+                    ? folderIdList.get(selectedFolderIdx)
+                    : Futhark.DEFAULT_FOLDER_ID;
+
                 if (mode.equals("update")) {
                     if (creationDate == null || creationDate.isBlank()) creationDate = " ";
-                    backend.updateEntry(conn, addupdate_id, tagField.getText().toCharArray(), dataFields, folderId, selectedType.typeKey.toCharArray(), creationDate);
+                    backend.updateEntry(conn, addupdate_id, tagField.getText().toCharArray(),
+                        dataFields, selectedFolderId, selectedType.typeKey.toCharArray(), creationDate);
                 } else {
-                    backend.addEntry(conn, tagField.getText().toCharArray(), selectedType.typeKey.toCharArray(), dataFields, DATABASE_TYPE, folderId, null, null);
+                    backend.addEntry(conn, tagField.getText().toCharArray(),
+                        selectedType.typeKey.toCharArray(), dataFields, DATABASE_TYPE,
+                        selectedFolderId, null, null);
                 }
 
                 for (char[] d : dataFields) if (d != null) Yggdrasil.wipeCharArray(d);
@@ -1540,80 +2088,63 @@ public class Odin {
         importBtn.addActionListener(e -> {
             binaryImportSuccess = false;
 
-            // Ask for filename via native file chooser dialog
             JFileChooser fc = new JFileChooser();
-            
             for (Component comp : fc.getComponents()) {
                 ThemeManager.themeFileChooserComponents(comp);
             }
 
             int result = fc.showOpenDialog(importBtn);
 
-            if (type.typeKey.toString().equals("docs")){
-            // ===== Reject unsupported file types before reading any bytes =====
-            String ext = fc.getSelectedFile().getName().toLowerCase();
-            if (!ext.matches(".*\\.(pdf|png|jpg|jpeg|gif|bmp|webp|txt|md|csv|log|docx|doc|xlsx|xls)$")) {
-                JOptionPane.showMessageDialog(null, "Unsupported file type: " + ext);
-                return;
-            }}
+            if (type.typeKey.toString().equals("docs")) {
+                // ===== Reject unsupported file types before reading any bytes =====
+                String ext = fc.getSelectedFile().getName().toLowerCase();
+                if (!ext.matches(".*\\.(pdf|png|jpg|jpeg|gif|bmp|webp|txt|md|csv|log|docx|doc|xlsx|xls)$")) {
+                    JOptionPane.showMessageDialog(null, "Unsupported file type: " + ext);
+                    return;
+                }
+            }
 
-            // Bail out if user cancelled the dialog
             if (result != JFileChooser.APPROVE_OPTION) return;
 
-            // Store the absolute path for later use
             binaryPath = fc.getSelectedFile().getAbsolutePath();
-
-            // Extract just the filename portion for the Filename field
             String fileName = fc.getSelectedFile().getName();
             Path inputPath  = Path.of(binaryPath);
 
             try {
                 long maxBytes;
-                // Enforce 100MB size limit before reading anything
                 long fileSizeBytes = Files.size(inputPath);
-                if (type.typeKey.toString().equals("docs")){maxBytes = 200L * 1024 * 1024;} else {maxBytes = 100L * 1024 * 1024;}
+                if (type.typeKey.toString().equals("docs")) { maxBytes = 200L * 1024 * 1024; } else { maxBytes = 100L * 1024 * 1024; }
                 if (fileSizeBytes > maxBytes) {
                     JOptionPane.showMessageDialog(null, "File exceeds 200MB limit.");
                     return;
                 }
 
-                // SHA-256 the file via streaming before loading into memory
                 shasumFile = SHA256Util.hashFile(inputPath);
                 byte[] fileBytes = null;
 
-                long max50MBytes      = 50L * 1024 * 1024;
-                if (fileSizeBytes < max50MBytes) {try {
-                    // Read file bytes once; safe under 100MB limit
-                    fileBytes = Files.readAllBytes(inputPath);
-                    // Encode binary to Base64 for storage in SQLite text field
-                    base64Encoded = Base64.getEncoder().encodeToString(fileBytes).toCharArray();
-
-                    // SHA-256 the raw data bytes (separate from the file hash above)
-                    shasumData = SHA256Util.hashBytes(fileBytes);
-
-                } finally {
-                    // Wipe raw bytes from memory immediately after encoding
-                    Arrays.fill(fileBytes, (byte) 0);
-                }}
-
+                long max50MBytes = 50L * 1024 * 1024;
+                if (fileSizeBytes < max50MBytes) {
+                    try {
+                        fileBytes     = Files.readAllBytes(inputPath);
+                        base64Encoded = Base64.getEncoder().encodeToString(fileBytes).toCharArray();
+                        shasumData    = SHA256Util.hashBytes(fileBytes);
+                    } finally {
+                        if (fileBytes != null) Arrays.fill(fileBytes, (byte) 0);
+                    }
+                }
             } catch (IOException ex) {
                 throw new UncheckedIOException("Failed to process file: " + binaryPath, ex);
             }
 
-            // Walk inputs in parallel with type.fields to find fields by label
-            // This lets us target Base64, Filename, SHA256 File, SHA256 Data precisely
+            // ===== Walk inputs in parallel with type.fields to find fields by label =====
             for (int i = 0; i < type.fields.size() && i < inputs.size(); i++) {
                 String     label = type.fields.get(i).label;
                 JComponent comp  = inputs.get(i);
-
                 switch (label) {
-
                     case "Base64" -> {
-                        // Base64 lives inside a JPanel wrapper with a passwordField property
                         if (comp instanceof JPanel wrapper) {
                             Object pfProp = wrapper.getClientProperty("passwordField");
                             if (pfProp instanceof JPasswordField pf) {
-                                // Re-enable temporarily to allow programmatic setText()
                                 pf.setEnabled(true);
                                 pf.setText(new String(base64Encoded));
                                 pf.setEnabled(false);
@@ -1624,9 +2155,7 @@ public class Odin {
                             pf.setEnabled(false);
                         }
                     }
-
                     case "Filename" -> {
-                        // Plain JTextField; re-enable to write, then lock again
                         if (comp instanceof JTextField tf) {
                             tf.setEnabled(true);
                             tf.setText(fileName);
@@ -1634,9 +2163,7 @@ public class Odin {
                             tf.setBackground(ThemeManager.BORDER);
                         }
                     }
-
                     case "SHA256 File" -> {
-                        // Hash of the raw file bytes before any encoding
                         if (comp instanceof JTextField tf) {
                             tf.setEnabled(true);
                             tf.setText(shasumFile);
@@ -1644,9 +2171,7 @@ public class Odin {
                             tf.setBackground(ThemeManager.BORDER);
                         }
                     }
-
                     case "SHA256 Data" -> {
-                        // Hash of the data after encoding; proves encoding round-trip integrity
                         if (comp instanceof JTextField tf) {
                             tf.setEnabled(true);
                             tf.setText(shasumData);
@@ -1657,7 +2182,6 @@ public class Odin {
                 }
             }
 
-            // Mark import as successful only after all fields are populated
             if (base64Encoded != null && !new String(base64Encoded).isEmpty()) {
                 binaryImportSuccess = true;
                 System.out.println("File hash : " + shasumFile);
@@ -1666,7 +2190,11 @@ public class Odin {
             backend.wipeCharArray(base64Encoded);
         });
 
-        if (type.typeKey.toString().equals("docs")){importRow.add(new JLabel("Document or Picture File [< 200MB]: "));} else {importRow.add(new JLabel("Binary File [< 100MB]: "));}
+        if (type.typeKey.toString().equals("docs")) {
+            importRow.add(new JLabel("Document or Picture File [< 200MB]: "));
+        } else {
+            importRow.add(new JLabel("Binary File [< 100MB]: "));
+        }
         importRow.add(importBtn);
         return importRow;
     }
@@ -1716,46 +2244,51 @@ public class Odin {
     }
 
     // ===== DELETE ENTRY =====
+    // ===== If viewing Trash: permanently delete from DB. =====
+    // ===== Otherwise: move to Trash folder. =====
     private void deleteEntry() {
-        // ===== GET ALL SELECTED ROW INDICES =====
         int[] rows = table.getSelectedRows();
-
-        // No selection - nothing to do
         if (rows.length == 0) return;
 
-        // ===== CONFIRM DELETION - show count so user knows scope =====
-        int confirm = ThemeManager.showThemedConfirm(mainFrame,
-    "Delete " + rows.length + " selected entr" + (rows.length == 1 ? "y" : "ies") + "?",
-    "Confirm Delete");
-    
-        if (confirm == JOptionPane.YES_OPTION) {
-            try {
-                // ===== COLLECT IDs BEFORE DELETION =====
-                // Rows must be collected upfront - indices shift as rows are removed
-                // Sort descending so removal from bottom up doesn't affect upper indices
-                int[] sortedRows = rows.clone();
-                java.util.Arrays.sort(sortedRows);
+        boolean inTrash = Futhark.TRASH_FOLDER_ID.equals(currentFolderFilter);
+        String  count   = rows.length + " secret" + (rows.length == 1 ? "" : "s");
 
-                // ===== DELETE EACH SELECTED ENTRY BY ID =====
-                for (int i = sortedRows.length - 1; i >= 0; i--) {
-                    int id = (int) model.getValueAt(sortedRows[i], 0);
+        // ===== Confirmation message differs based on context =====
+        String msg = inTrash
+            ? "Permanently delete " + count + "?\nThis cannot be undone."
+            : "Move " + count + " to Trash?";
+        String title = inTrash ? "Confirm Permanent Delete" : "Move to Trash";
+
+        int confirm = ThemeManager.showThemedConfirm(mainFrame, msg, title);
+        if (confirm != JOptionPane.YES_OPTION) return;
+
+        try {
+            int[] sortedRows = rows.clone();
+            java.util.Arrays.sort(sortedRows);
+
+            for (int i = sortedRows.length - 1; i >= 0; i--) {
+                int id = (int) model.getValueAt(sortedRows[i], 0);
+                if (inTrash) {
+                    // ===== Permanently remove from DB =====
                     databaseutilities.deleteEntry(conn, id);
+                } else {
+                    // ===== Move to Trash - re-encrypts folderId only, same IV =====
+                    backend.moveToTrash(conn, id);
                 }
-
-                // ===== RELOAD STATE AFTER ALL DELETES =====
-                credentials = backend.loadAll(conn);
-                refreshTable();
-
-                // ===== CLEAR DETAIL PANEL AFTER DELETE =====
-                detailContent.removeAll();
-                detailContent.revalidate();
-                detailContent.repaint();
-
-                ToastManager.info(mainFrame, rows.length + " entr" + (rows.length == 1 ? "y" : "ies") + " deleted.");
-            } catch (Exception e) {
-                e.printStackTrace();
-                ToastManager.error(mainFrame, "Failed to delete entries.");
             }
+
+            credentials = backend.loadAll(conn);
+            refreshTable();
+
+            detailContent.removeAll();
+            detailContent.revalidate();
+            detailContent.repaint();
+
+            String action = inTrash ? "permanently deleted" : "moved to Trash";
+            ToastManager.info(mainFrame, count + " " + action + ".");
+        } catch (Exception e) {
+            e.printStackTrace();
+            ToastManager.error(mainFrame, "Failed to delete.");
         }
     }
 
@@ -1786,12 +2319,12 @@ public class Odin {
     }
 
     // ===== CREATE / UPDATE MASTER PASSWORD DIALOG =====
-    // Called by Login for new vault, and by changeMasterPass() for password updates
-    public char[][] createNewMasterPass(Connection conn, boolean createVault, boolean arg_vaultLevel, String vaultlevel ,int password_length) {
+    // ===== Called by Login for new vault, and by changeMasterPass() for password updates =====
+    public char[][] createNewMasterPass(Connection conn, boolean createVault, boolean arg_vaultLevel, String vaultlevel, int password_length) {
         arg_VaultLevel = arg_vaultLevel;
-        VaultLevel = vaultlevel;
+        VaultLevel     = vaultlevel;
         PASSWORD_LENGTH = password_length;
-        
+
         while (true) {
             JPasswordField pf1            = new JPasswordField(20);
             JPasswordField pf2            = new JPasswordField(20);
@@ -1834,8 +2367,8 @@ public class Odin {
             if (!createVault) {
                 // ===== Pre-select current vault level when changing password =====
                 try {
-                    if (!arg_vaultLevel) VaultLevel  = Mimir.Pull_DB_Text_Meta_item(conn, "vault_level");
-                    int    idx = switch (VaultLevel.trim()) {
+                    if (!arg_vaultLevel) VaultLevel = Mimir.Pull_DB_Text_Meta_item(conn, "vault_level");
+                    int idx = switch (VaultLevel.trim()) {
                         case "MINIMUM"  -> 0;
                         case "WARDEN"   -> 1;
                         case "BALANCED" -> 2;
@@ -1868,18 +2401,17 @@ public class Odin {
             ThemeManager.styleSurfaceButton(btnCancel);
 
             Object[] msg = {
-                blank,blank,
-                blank2,blank2,
+                blank, blank,
+                blank2, blank2,
                 typeLabel, dbSelector, usernameLabel, usernameField,
-                blank,blank,
-                "Create Master Password:",  pf1,
-                "Confirm Password:",        pf2,
-                "Password Strength:",       strengthBar,
-                "Security Profile:",        profileSelector,
+                blank, blank,
+                "Create Master Password:", pf1,
+                "Confirm Password:",       pf2,
+                "Password Strength:",      strengthBar,
+                "Security Profile:",       profileSelector,
                 kdfBtn,
-                blank,blank,
-                
-                blank3,blank3,
+                blank, blank,
+                blank3, blank3,
             };
 
             JOptionPane passPane = new JOptionPane(msg, JOptionPane.PLAIN_MESSAGE,
@@ -1893,7 +2425,7 @@ public class Odin {
             final boolean[] confirmed = { false };
 
             // ===== CANCEL - unrecoverable at this stage =====
-            btnCancel.addActionListener(e -> { passDialog.dispose(); if (createVault) System.exit(0);});
+            btnCancel.addActionListener(e -> { passDialog.dispose(); if (createVault) System.exit(0); });
             pf2.addActionListener(e -> { confirmed[0] = true; passDialog.dispose(); });
             btnConfirm.addActionListener(e -> { confirmed[0] = true; passDialog.dispose(); });
 
@@ -1906,7 +2438,7 @@ public class Odin {
 
             blank.setVisible(true);
             passDialog.setVisible(true);
-            if (!confirmed[0]) if (createVault)System.exit(0); else return null;
+            if (!confirmed[0]) if (createVault) System.exit(0); else return null;
 
             masterPassword = pf1.getPassword();
             DATABASE_TYPE  = dbSelector.getSelectedIndex() == 1 ? "m" : "s";
@@ -1933,7 +2465,7 @@ public class Odin {
             creds[0] = "true".toCharArray();
             creds[1] = masterPassword;
             creds[2] = (username != null && !username.isEmpty())
-                    ? username.toCharArray() 
+                    ? username.toCharArray()
                     : "single-user".toCharArray();
             creds[3] = VaultLevel.toCharArray();
             creds[4] = DATABASE_TYPE.toCharArray();
