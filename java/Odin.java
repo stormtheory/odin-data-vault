@@ -2032,13 +2032,37 @@ table.addMouseListener(new MouseAdapter() {
 
         if (preSelected != null) cards.show(cardPanel, preSelected.typeKey);
 
+        // ===== SCROLL WRAPPER for card panel =====
+        // ===== Allows the dialog to scroll on low-resolution displays =====
+        // ===== Min height keeps the form usable; max height prevents overflow =====
+        java.awt.Rectangle screenBounds = java.awt.GraphicsEnvironment
+            .getLocalGraphicsEnvironment()
+            .getMaximumWindowBounds(); // ===== Excludes taskbar - real usable area =====
+        int maxDialogH  = (int) (screenBounds.height * 0.80); // ===== 80% of usable screen height =====
+        int cardScrollH = Math.max(200, maxDialogH - 220);     // ===== Reserve space for tag/folder/buttons =====
+
+        JScrollPane cardScroll = new JScrollPane(cardPanel);
+        cardScroll.setBorder(null);
+        cardScroll.setOpaque(false);
+        cardScroll.getViewport().setOpaque(false);
+        cardScroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        cardScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        //cardScroll.setPreferredSize(new Dimension(520, cardScrollH));
+        //cardScroll.setMinimumSize(new Dimension(400, 200));
+        int fixedCardH = Math.min(cardScrollH, 550); // ===== 320px fits ~6 fields without waste =====
+        cardScroll.setPreferredSize(new Dimension(500, fixedCardH));
+        cardScroll.setMinimumSize(new Dimension(400, 180));
+        cardScroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, fixedCardH));
+        // ===== Fast scroll - 3 field heights per click =====
+        cardScroll.getVerticalScrollBar().setUnitIncrement(44);
+        cardScroll.getVerticalScrollBar().setBlockIncrement(132);
+
         // ===== FOLDER LABEL for dialog =====
         JLabel folderLabel = new JLabel("Folder:");
         folderLabel.setForeground(ThemeManager.TEXT_MUTED);
         folderLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
 
-        Object[]  message   = { "Entry Type:", typeBox, "Tag / Label:", tagField,
-                                 folderLabel, folderBox, cardPanel };
+        Object[]  message   = { "Entry Type:", typeBox, "Tag / Label:", tagField, folderLabel, folderBox, cardScroll };
         JButton   btnAdd    = new JButton(mode.equals("update") ? "Update" : "Add Entry");
         JButton   btnCancel = new JButton("Cancel");
         ThemeManager.styleAccentButton(btnAdd);
@@ -2050,9 +2074,22 @@ table.addMouseListener(new MouseAdapter() {
         JDialog entryDialog = entryPane.createDialog(mainFrame, "Add Entry");
         entryDialog.setModal(true);
 
-        entryDialog.setMinimumSize(new Dimension(520, 400));
-        entryDialog.setPreferredSize(new Dimension(560, entryDialog.getPreferredSize().height));
+        // ===== Allow user to resize the dialog freely =====
+        entryDialog.setResizable(true);
+        entryDialog.setMinimumSize(new Dimension(480, 300));
+
+        // ===== Cap preferred height to 90% of usable screen space =====
+        // ===== Recalculate here in case screenBounds changed (multi-monitor) =====
+        java.awt.Rectangle dialogScreen = java.awt.GraphicsEnvironment
+            .getLocalGraphicsEnvironment()
+            .getMaximumWindowBounds();
+        int capH = (int) (dialogScreen.height * 0.90);
         entryDialog.pack();
+        if (entryDialog.getHeight() > capH) {
+            entryDialog.setSize(entryDialog.getWidth(), capH);
+        }
+        // ===== Center on screen after size is finalized =====
+        entryDialog.setLocationRelativeTo(mainFrame);
 
         final boolean[] confirmed = { false };
         btnCancel.addActionListener(e -> entryDialog.dispose());
