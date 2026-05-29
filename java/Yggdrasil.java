@@ -99,8 +99,8 @@ public class Yggdrasil {
     // A salt is random data added before key derivation - prevents rainbow table attacks
     protected void GetFiredUp(char[] masterPassword, byte[] vault_salt, Connection conn, String username, String type, boolean debug) throws Exception {
         DEBUG = debug;
-        System.out.println(username);
-        System.out.println("masterPassword empty? " +
+        if (DEBUG) System.out.println("[Yggdrasil] " + username);
+        if (DEBUG) System.out.println("[Yggdrasil] masterPassword empty? " +
             (masterPassword == null || masterPassword.length == 0 || masterPassword[0] == '\0'));
 
         Security.addProvider(new BouncyCastleProvider());
@@ -454,7 +454,7 @@ public class Yggdrasil {
         if (creationDate == null || creationDate.isBlank() || creationDate.equals("2245")) creationDate = timeCheck_UTC_time();
         if (revisionDate == null || revisionDate.isBlank()) revisionDate = creationDate;
 
-        if (DEBUG) System.out.println("Folder: " + folderId + " | Creation: " + creationDate + " | Revision: " + revisionDate);
+        if (DEBUG) System.out.println("[Yggdrasil] Folder: " + folderId + " | Creation: " + creationDate + " | Revision: " + revisionDate);
 
         byte[] enc_fI   = encryptData(folderId.toCharArray(),   iv, Vault_Use_Key);
         byte[] enc_cd   = encryptData(creationDate.toCharArray(),   iv, Vault_Use_Key);
@@ -481,7 +481,7 @@ public class Yggdrasil {
             stmt.setBytes(14, enc_fI);
             stmt.setBytes(15, iv);
             stmt.executeUpdate();
-            if (DEBUG) System.out.println("Data Saved.");
+            if (DEBUG) System.out.println("[Yggdrasil] Data Saved.");
         }
 
         // Wipe all temporary sensitive arrays immediately after write
@@ -523,7 +523,7 @@ public class Yggdrasil {
             update.setInt(16,   id);
             update.executeUpdate();
         }
-        if (DEBUG) System.out.println("Data Saved.");
+        if (DEBUG) System.out.println("[Yggdrasil] Data Saved.");
         // Wipe all temporary sensitive arrays immediately after write
         wipeCharArray(tag);
         for (char[] d : dataFields) if (d != null) wipeCharArray(d);
@@ -555,7 +555,7 @@ public class Yggdrasil {
             update.setString(2,   username);
             update.executeUpdate();
         }
-        if (DEBUG) System.out.println("Login updated.");
+        if (DEBUG) System.out.println("[Yggdrasil] Login updated.");
         wipeByteArray(iv);
     }
 
@@ -572,7 +572,7 @@ public class Yggdrasil {
             update.setString(3,   username);
             update.executeUpdate();
         }
-        if (DEBUG) System.out.println("Login updated.");
+        if (DEBUG) System.out.println("[Yggdrasil] Login updated.");
         wipeByteArray(iv);
         wipeByteArray(enc_created_at);
     }
@@ -602,7 +602,7 @@ public class Yggdrasil {
             insert.setInt(6,    profile.memoryKb());
             insert.setInt(7,    profile.parallelism());
             insert.executeUpdate();
-            if (DEBUG) System.out.println("Data Saved.");
+            if (DEBUG) System.out.println("[Yggdrasil] Data Saved.");
         }
         set_DB_Creation_User(conn, newUsername);
         wipeByteArray(new_User_AES_Key);
@@ -733,6 +733,8 @@ public class Yggdrasil {
                 insert.setString(1, "vk_status"); insert.setString(2, "na"); insert.addBatch();
                 insert.setString(1, "vault_status"); insert.setString(2, "new"); insert.addBatch();
             }
+            insert.setString(1, "theme"); insert.setString(2, "dark"); insert.addBatch();
+            insert.setString(1, "client-timeout"); insert.setString(2, "10"); insert.addBatch();
             insert.executeBatch();
         }
 
@@ -830,7 +832,7 @@ public class Yggdrasil {
         }
 
         wipeByteArray(encTrashId);
-        if (DEBUG) System.out.println("Moved to trash: " + id);
+        if (DEBUG) System.out.println("[Yggdrasil] Moved to trash: " + id);
     }
 
     // ===== FOLDER DATA CLASS =====
@@ -1020,6 +1022,6 @@ public class Yggdrasil {
             del.setString(1, folderId);
             del.executeUpdate();
         }
-        if (DEBUG) System.out.println("Folder deleted and credentials moved to Unsorted: " + folderId);
+        if (DEBUG) System.out.println("[Yggdrasil] Folder deleted and credentials moved to Unsorted: " + folderId);
     }
 }

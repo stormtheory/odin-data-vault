@@ -2,6 +2,8 @@ import java.awt.*;
 import java.awt.event.*;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -17,7 +19,6 @@ public class Odin {
 // ===== CONFIG =====
     
     public  static final String DATABASE_VER       = "0";
-    public  static long         IDLE_TIMEOUT_MINUTES = 10;
     private static final int    CLIPBOARD_CLEAR_MS = 30_000; // 30 seconds
     private static final int    BUFFER_SIZE = 8 * 1024;
 
@@ -47,6 +48,7 @@ public class Odin {
     public List<Yggdrasil.Folder>        folders      = new ArrayList<>();
     public Yggdrasil                     backend      = new Yggdrasil();
     public int                           PASSWORD_LENGTH;
+    public static long                   IDLE_TIMEOUT_MINUTES = 10;
     public static boolean                DEBUG;
 
 // import
@@ -180,33 +182,61 @@ public class Odin {
 
         // ===== DOUBLE-CLICK TO COPY =====
         // ===== Double-clicking any cell copies its decrypted value to clipboard =====
-        table.addMouseListener(new MouseAdapter() {
-            public void mouseClicked(MouseEvent e) {
-                int row = table.rowAtPoint(e.getPoint());
-                int col = table.columnAtPoint(e.getPoint());
-                if (DEBUG) System.out.println("ROW:" + row);
-                if (row < 0) return;
-
-                // ===== RESOLVE CREDENTIAL BY DB ID - safe under filter/search =====
-                // ===== model col 0 holds the DB id; find the matching credential by id directly. =====
-                // ===== Using id-1 or visibleRowToCredentialIndex both break when search is active =====
-                // ===== because the visible row count no longer matches the full list. =====
-                int dbId = (Integer) model.getValueAt(row, 0);
-                int credIndex = findCredentialIndexById(dbId);
-                if (credIndex < 0) return; // ===== Guard: no match found =====
-
-                // ===== SINGLE CLICK - show detail panel =====
-                if (e.getClickCount() == 1) {
-                    showDetailPanel(credIndex);
+table.addMouseListener(new MouseAdapter() {
+    public void mouseClicked(MouseEvent e) {
+        int row = table.rowAtPoint(e.getPoint());
+        int col = table.columnAtPoint(e.getPoint());
+        if (DEBUG) System.out.println("ROW:" + row);
+        if (row < 0) return;
+        int dbId = (Integer) model.getValueAt(row, 0);
+        int credIndex = findCredentialIndexById(dbId);
+        if (credIndex < 0) return; // ===== Guard: no match found =====
+        // ===== SINGLE CLICK - show detail panel =====
+        if (e.getClickCount() == 1) {
+            showDetailPanel(credIndex);
+        }
+        // ===== DOUBLE CLICK - copy field to clipboard or open URL =====
+        if (e.getClickCount() == 2) {
+            if (col == 0) return;
+            Object cellValue = model.getValueAt(row, col);
+            if (cellValue == null) return;
+            String cellText = cellValue.toString().trim();
+            boolean looksLikeUrl = cellText.startsWith("http://")
+                                || cellText.startsWith("https://")
+                                || cellText.startsWith("www.");
+            if (looksLikeUrl) {
+                // ===== Ensure scheme is present - Desktop.browse() requires it =====
+                // ===== Prepend https:// to bare www. domains =====
+                String url = cellText.startsWith("www.") ? "https://" + cellText : cellText;
+                try {
+                    if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                        // ===== Use OS default browser - works on Windows and most Linux desktops =====
+                        Desktop.getDesktop().browse(new URI(url));
+                        if (DEBUG) System.out.println("Opening URL: " + url);
+                    } else {
+                        // ===== Fallback for Linux environments without Desktop.BROWSE support =====
+                        openUrlFallback(url);
+                    }
+                } catch (URISyntaxException ex) {
+                    JOptionPane.showMessageDialog(mainFrame,
+                        "Invalid URL: " + url,
+                        "Cannot Open URL",
+                        JOptionPane.WARNING_MESSAGE);
+                        copyFieldToClipboard(credIndex, col);
+                } catch (IOException ex) {
+                    JOptionPane.showMessageDialog(mainFrame,
+                        "Could not open browser: " + ex.getMessage(),
+                        "Browser Error",
+                        JOptionPane.ERROR_MESSAGE);
+                        copyFieldToClipboard(credIndex, col);
                 }
-
-                // ===== DOUBLE CLICK - copy field to clipboard =====
-                if (e.getClickCount() == 2) {
-                    if (col == 0) return; // Never copy hidden ID column
-                    copyFieldToClipboard(credIndex, col);
-                }
+                return;
             }
-        });
+            // ===== Non-URL field - copy decrypted value to clipboard as before =====
+            copyFieldToClipboard(credIndex, col);
+        }
+    }
+});
 
         refreshTable();
 
@@ -284,6 +314,29 @@ public class Odin {
             if (credentials.get(i).id == id) return i;
         }
         return -1;
+    }
+
+    // ===== FALLBACK URL OPENER =====
+    // ===== Used when java.awt.Desktop.BROWSE is unavailable =====
+    // ===== Covers minimal Linux setups (no GUI session, some Wayland configs) =====
+    private void openUrlFallback(String url) {
+        String os = System.getProperty("os.name").toLowerCase();
+        try {
+            if (os.contains("linux")) {
+                // ===== xdg-open is the standard Linux URL dispatcher =====
+                new ProcessBuilder("xdg-open", url).start();
+            } else if (os.contains("windows")) {
+                // ===== rundll32 is a reliable Windows fallback =====
+                new ProcessBuilder("rundll32", "url.dll,FileProtocolHandler", url).start();
+            }
+            if (DEBUG) System.out.println("Fallback browser open: " + url);
+        } catch (IOException ex) {
+            // ===== Both methods failed - last resort user notification =====
+            JOptionPane.showMessageDialog(mainFrame,
+                "Could not open browser. Please copy the URL manually.",
+                "Browser Unavailable",
+                JOptionPane.ERROR_MESSAGE);
+        }
     }
 
     // ===== SEARCH BAR =====
@@ -1979,13 +2032,37 @@ public class Odin {
 
         if (preSelected != null) cards.show(cardPanel, preSelected.typeKey);
 
+        // ===== SCROLL WRAPPER for card panel =====
+        // ===== Allows the dialog to scroll on low-resolution displays =====
+        // ===== Min height keeps the form usable; max height prevents overflow =====
+        java.awt.Rectangle screenBounds = java.awt.GraphicsEnvironment
+            .getLocalGraphicsEnvironment()
+            .getMaximumWindowBounds(); // ===== Excludes taskbar - real usable area =====
+        int maxDialogH  = (int) (screenBounds.height * 0.80); // ===== 80% of usable screen height =====
+        int cardScrollH = Math.max(200, maxDialogH - 220);     // ===== Reserve space for tag/folder/buttons =====
+
+        JScrollPane cardScroll = new JScrollPane(cardPanel);
+        cardScroll.setBorder(null);
+        cardScroll.setOpaque(false);
+        cardScroll.getViewport().setOpaque(false);
+        cardScroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        cardScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        //cardScroll.setPreferredSize(new Dimension(520, cardScrollH));
+        //cardScroll.setMinimumSize(new Dimension(400, 200));
+        int fixedCardH = Math.min(cardScrollH, 550); // ===== 320px fits ~6 fields without waste =====
+        cardScroll.setPreferredSize(new Dimension(500, fixedCardH));
+        cardScroll.setMinimumSize(new Dimension(400, 180));
+        cardScroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, fixedCardH));
+        // ===== Fast scroll - 3 field heights per click =====
+        cardScroll.getVerticalScrollBar().setUnitIncrement(44);
+        cardScroll.getVerticalScrollBar().setBlockIncrement(132);
+
         // ===== FOLDER LABEL for dialog =====
         JLabel folderLabel = new JLabel("Folder:");
         folderLabel.setForeground(ThemeManager.TEXT_MUTED);
         folderLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
 
-        Object[]  message   = { "Entry Type:", typeBox, "Tag / Label:", tagField,
-                                 folderLabel, folderBox, cardPanel };
+        Object[]  message   = { "Entry Type:", typeBox, "Tag / Label:", tagField, folderLabel, folderBox, cardScroll };
         JButton   btnAdd    = new JButton(mode.equals("update") ? "Update" : "Add Entry");
         JButton   btnCancel = new JButton("Cancel");
         ThemeManager.styleAccentButton(btnAdd);
@@ -1997,9 +2074,22 @@ public class Odin {
         JDialog entryDialog = entryPane.createDialog(mainFrame, "Add Entry");
         entryDialog.setModal(true);
 
-        entryDialog.setMinimumSize(new Dimension(520, 400));
-        entryDialog.setPreferredSize(new Dimension(560, entryDialog.getPreferredSize().height));
+        // ===== Allow user to resize the dialog freely =====
+        entryDialog.setResizable(true);
+        entryDialog.setMinimumSize(new Dimension(480, 300));
+
+        // ===== Cap preferred height to 90% of usable screen space =====
+        // ===== Recalculate here in case screenBounds changed (multi-monitor) =====
+        java.awt.Rectangle dialogScreen = java.awt.GraphicsEnvironment
+            .getLocalGraphicsEnvironment()
+            .getMaximumWindowBounds();
+        int capH = (int) (dialogScreen.height * 0.90);
         entryDialog.pack();
+        if (entryDialog.getHeight() > capH) {
+            entryDialog.setSize(entryDialog.getWidth(), capH);
+        }
+        // ===== Center on screen after size is finalized =====
+        entryDialog.setLocationRelativeTo(mainFrame);
 
         final boolean[] confirmed = { false };
         btnCancel.addActionListener(e -> entryDialog.dispose());

@@ -313,6 +313,7 @@ goto flag_loop
 :: ====================================================================
 :BUILD
 :: Clean old class files before recompile
+mkdir "bin" 2>nul
 if exist bin\* del /q bin\*
 
 :: -encoding UTF-8 is required on Windows because javac defaults to the
@@ -320,8 +321,8 @@ if exist bin\* del /q bin\*
 :: characters used in string literals and comments in the source files.
 :: Without this flag, any non-ASCII character (emoji, bullet, en-dash etc.)
 :: causes "unmappable character" errors and a broken build.
-echo javac -encoding UTF-8 -cp ".;lib\%SQLITE_LIB%;lib\%PDF_LIB%;lib\%JSON_LIB%;lib\%ARGON2_LIB%;lib\%ARGON2_NOLIB%;lib\%BOUNCY_HOUSE_LIB%;lib\%JNA_LIB%;bin" -d bin *.java
-javac -encoding UTF-8 -cp ".;lib\%SQLITE_LIB%;lib\%PDF_LIB%;lib\%JSON_LIB%;lib\%ARGON2_LIB%;lib\%ARGON2_NOLIB%;lib\%BOUNCY_HOUSE_LIB%;lib\%JNA_LIB%;bin" -d bin *.java
+echo javac -encoding UTF-8 -cp ".;lib\%SQLITE_LIB%;lib\%PDF_LIB%;lib\%JSON_LIB%;lib\%ARGON2_LIB%;lib\%ARGON2_NOLIB%;lib\%BOUNCY_HOUSE_LIB%;lib\%JNA_LIB%;bin" -d bin java\*.java
+javac -encoding UTF-8 -cp ".;lib\%SQLITE_LIB%;lib\%PDF_LIB%;lib\%JSON_LIB%;lib\%ARGON2_LIB%;lib\%ARGON2_NOLIB%;lib\%BOUNCY_HOUSE_LIB%;lib\%JNA_LIB%;bin" -d bin java\*.java
 
 :: Abort immediately if javac failed - do not attempt to launch with
 :: missing or stale class files, which produces a misleading
@@ -504,7 +505,7 @@ if exist "!_STAGE!" rmdir /s /q "!_STAGE!"
 ::   -encoding UTF-8 prevents unmappable character errors on Windows codepages
 echo [2/8] Compiling with javac !_VER!...
 mkdir "bin_!_VER!" 2>nul
-"!_JAVAC!" -encoding UTF-8 -cp ".;lib\%SQLITE_LIB%;lib\%PDF_LIB%;lib\%JSON_LIB%;lib\%ARGON2_LIB%;lib\%ARGON2_NOLIB%;lib\%BOUNCY_HOUSE_LIB%;lib\%JNA_LIB%" -d "bin_!_VER!" *.java
+"!_JAVAC!" -encoding UTF-8 -cp ".;lib\%SQLITE_LIB%;lib\%PDF_LIB%;lib\%JSON_LIB%;lib\%ARGON2_LIB%;lib\%ARGON2_NOLIB%;lib\%BOUNCY_HOUSE_LIB%;lib\%JNA_LIB%" -d "bin_!_VER!" java\*.java
 if errorlevel 1 (
     echo [WARN] Compile failed for JDK !_VER! - skipping this version.
     set /a _BUILD_ERRORS+=1
