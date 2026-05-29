@@ -733,6 +733,8 @@ public class Yggdrasil {
                 insert.setString(1, "vk_status"); insert.setString(2, "na"); insert.addBatch();
                 insert.setString(1, "vault_status"); insert.setString(2, "new"); insert.addBatch();
             }
+            insert.setString(1, "theme"); insert.setString(2, "dark"); insert.addBatch();
+            insert.setString(1, "client-timeout"); insert.setString(2, "10"); insert.addBatch();
             insert.executeBatch();
         }
 

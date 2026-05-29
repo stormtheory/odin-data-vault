@@ -19,7 +19,6 @@ public class Odin {
 // ===== CONFIG =====
     
     public  static final String DATABASE_VER       = "0";
-    public  static long         IDLE_TIMEOUT_MINUTES = 10;
     private static final int    CLIPBOARD_CLEAR_MS = 30_000; // 30 seconds
     private static final int    BUFFER_SIZE = 8 * 1024;
 
@@ -49,6 +48,7 @@ public class Odin {
     public List<Yggdrasil.Folder>        folders      = new ArrayList<>();
     public Yggdrasil                     backend      = new Yggdrasil();
     public int                           PASSWORD_LENGTH;
+    public static long                   IDLE_TIMEOUT_MINUTES = 10;
     public static boolean                DEBUG;
 
 // import

@@ -103,7 +103,7 @@ ZIP_UP() {
 JAR(){
     mkdir -p ./bin
     # ===== Clean old build =====
-    rm -f bin/* $JAR_FILENAME
+    rm -f bin/*
     rm -rf fatjar
 
     # ===== Compile =====
@@ -132,7 +132,7 @@ JAR(){
 }
 
 BUILD() {
-        rm -f ./bin
+        rm -f ./bin/*
         echo "javac -cp \".:lib/$SQLITE_LIB:lib/$ARGON2_LIB:lib/$ARGON2_NOLIB:lib/$BOUNCY_HOUSE_LIB:lib/$JNA_LIB:lib/$PDF_LIB:lib/$JSON_LIB:bin\" -d bin java/*.java"
         
         if [ "$DEBUG" != true ];then

@@ -11,11 +11,8 @@ import java.util.Arrays;
 import javax.swing.*;
 import javax.swing.table.*;
 import org.json.*;
-import java.awt.BorderLayout;
-import java.awt.Color;
-import java.awt.Component;
-import java.awt.FlowLayout;
-import java.awt.Font;
+import java.awt.*;
+import java.sql.*;
 import java.awt.event.*;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -37,7 +34,8 @@ import java.time.format.DateTimeFormatter;
  * with detailed intent comments describing what each would do.
  */
 public class AccountManagement {
-
+    private IdleTimeoutManager idleManagerstop;
+    private int IDLE_TIMEOUT_MINUTES = 10;
     // ===== STATIC SHARED FIELDS =====
     protected static Mimir  databaseutilities = new Mimir();
     protected static Odin   odin              = new Odin();
@@ -189,6 +187,7 @@ public class AccountManagement {
         JButton btnPass    = new JButton("Change Password");
         JButton btnReauth  = new JButton("Force Re-auth");
         JButton btnUpgrade = new JButton("Upgrade Params");
+        JButton btnSettings = new JButton("Settings");
         JButton btnRefresh = new JButton("Refresh");
 
         ThemeManager.styleSurfaceButton(btnAdd);
@@ -196,13 +195,14 @@ public class AccountManagement {
         ThemeManager.styleSurfaceButton(btnPass);
         ThemeManager.styleSurfaceButton(btnReauth);
         ThemeManager.styleSurfaceButton(btnUpgrade);
+        ThemeManager.styleSurfaceButton(btnSettings);
         ThemeManager.styleSurfaceButton(btnRefresh);
 
         // ===== INITIAL TOOLBAR STATE: no row selected =====
         // applyToolbarState is the single source of truth for all button
         // visibility and enabled state. Called here on open, and again
         // inside the selection listener on every row change.
-        applyToolbarState(btnAdd, btnDel, btnPass, btnReauth, btnUpgrade, btnRefresh,
+        applyToolbarState(btnAdd, btnDel, btnPass, btnReauth, btnUpgrade, btnRefresh, btnSettings,
                           false, false, false);
 
         // ===== ROW SELECTION LISTENER: re-evaluate toolbar state on every change =====
@@ -212,7 +212,7 @@ public class AccountManagement {
 
             // ===== NO ROW SELECTED: reset to no-selection defaults =====
             if (row < 0) {
-                applyToolbarState(btnAdd, btnDel, btnPass, btnReauth, btnUpgrade, btnRefresh,
+                applyToolbarState(btnAdd, btnDel, btnPass, btnReauth, btnUpgrade, btnRefresh, btnSettings,
                                   false, false, false);
                 return;
             }
@@ -220,7 +220,7 @@ public class AccountManagement {
             String selectedUid = (String) tableModel.getValueAt(row, 0);
             // ===== DERIVE CONTEXT FLAGS from selected row =====
             boolean isSelf = selectedUid.equals(username);
-            applyToolbarState(btnAdd, btnDel, btnPass, btnReauth, btnUpgrade, btnRefresh,
+            applyToolbarState(btnAdd, btnDel, btnPass, btnReauth, btnUpgrade, btnRefresh, btnSettings,
                             true, isSelf, currentUserIsAdmin);
         });
 
@@ -274,6 +274,33 @@ public class AccountManagement {
             ToastManager.info(parent, "Force re-auth for \"" + target + "\" (not yet implemented)");
         });
 
+            // ===== SETTINGS BUTTON: opens vault-level settings panel =====
+        btnSettings.addActionListener(e -> {
+            // ===== Pass a callback so IdleTimeoutManager restarts when timeout changes =====
+            SettingsPanel settings = new SettingsPanel(conn, parent, IDLE_TIMEOUT_MINUTES, DEBUG, () -> {
+                // ===== Reload the timeout value from meta then restart the idle manager =====
+                    try {
+                    String raw = Mimir.Pull_DB_Text_Meta_item(conn, "client-timeout");
+                    if (raw != null && !raw.isBlank()) {
+                        try {
+                            IDLE_TIMEOUT_MINUTES = Integer.parseInt(raw.trim());
+                        } catch (NumberFormatException ignore) {
+                            // ===== GUARD: corrupt meta value - keep current timeout =====
+                            if (DEBUG) System.out.println("Settings: bad timeout value in meta, keeping " + IDLE_TIMEOUT_MINUTES);
+                        }
+                    }
+                } catch (Exception ex) {
+                    // ===== NON-FATAL: keep existing timeout if meta read fails =====
+                    if (DEBUG) System.out.println("Settings: failed to reload timeout from meta: " + ex);
+                }
+                idleManagerstop.stop();
+                IdleTimeoutManager idleManager = new IdleTimeoutManager(parent, IDLE_TIMEOUT_MINUTES);
+                idleManager.start();
+                if (DEBUG) System.out.println("IdleTimeoutManager restarted at " + IDLE_TIMEOUT_MINUTES + " min");
+            });
+            settings.showSettingsPane();
+        });
+
         // ===== UPGRADE ARGON2 PARAMS ACTION (STUB) =====
         // INTENT: Re-derive the selected user's wrapped vault key using the current
         // recommended Argon2 parameters without requiring a password change.
@@ -318,8 +345,10 @@ public class AccountManagement {
         toolbar.add(btnReauth);
         toolbar.add(Box.createHorizontalStrut(6));
         toolbar.add(btnUpgrade);
-        toolbar.add(Box.createHorizontalGlue()); // ===== PUSH refresh to the right =====
+        toolbar.add(Box.createHorizontalStrut(6));
         toolbar.add(btnRefresh);
+        toolbar.add(Box.createHorizontalGlue());
+        toolbar.add(btnSettings);
 
         root.add(toolbar, BorderLayout.SOUTH);
 
@@ -383,7 +412,7 @@ public class AccountManagement {
      * @param isAdmin       true when the selected row's role is "admin"
      */
     private void applyToolbarState(JButton btnAdd, JButton btnDel, JButton btnPass,
-                                   JButton btnReauth, JButton btnUpgrade, JButton btnRefresh,
+                                   JButton btnReauth, JButton btnUpgrade, JButton btnRefresh, JButton btnSettings,
                                    boolean hasSelection, boolean isSelf, boolean isAdmin) {
 
         // ===== SINGLE-USER VAULT: hide all multi-user controls =====
@@ -397,6 +426,8 @@ public class AccountManagement {
             // ===== CHANGE PASSWORD: always visible, always enabled for own account =====
             btnPass.setVisible(true);
             btnPass.setEnabled(true);
+            btnSettings.setVisible(true);
+            btnSettings.setEnabled(true);
             return;
         }
 
@@ -407,6 +438,7 @@ public class AccountManagement {
         btnReauth.setVisible(true);
         btnUpgrade.setVisible(true);
         btnRefresh.setVisible(true);
+        btnSettings.setVisible(true);
 
         if (isAdmin && isSelf) {
             btnAdd.setEnabled(true);
@@ -415,6 +447,7 @@ public class AccountManagement {
             btnReauth.setEnabled(true);
             btnUpgrade.setEnabled(true);
             btnRefresh.setEnabled(true);
+            btnSettings.setEnabled(true);
             return;
         }
         if (isAdmin) {
@@ -424,6 +457,7 @@ public class AccountManagement {
             btnReauth.setEnabled(true);
             btnUpgrade.setEnabled(true);
             btnRefresh.setEnabled(true);
+            btnSettings.setEnabled(true);
             return;
         }
 
@@ -435,6 +469,7 @@ public class AccountManagement {
             btnReauth.setEnabled(false);
             btnUpgrade.setEnabled(false);
             btnRefresh.setEnabled(true);
+            btnSettings.setEnabled(false);
             return;
         }
 
@@ -446,6 +481,7 @@ public class AccountManagement {
             btnReauth.setEnabled(false);
             btnUpgrade.setEnabled(false);
             btnRefresh.setEnabled(true);
+            btnSettings.setEnabled(false);
             return;
         }
 
@@ -457,6 +493,7 @@ public class AccountManagement {
         btnReauth.setEnabled(false);
         btnUpgrade.setEnabled(false);
         btnRefresh.setEnabled(false);
+        btnSettings.setEnabled(false);
     }
 
 
@@ -727,6 +764,245 @@ public class AccountManagement {
         } catch (Exception e) {
             e.printStackTrace();
             ToastManager.error(parent, "Failed to delete user: \"" + target + "\"");
+        }
+    }
+
+    /**
+     * ===== SETTINGS PANEL =====
+     *
+     * Displays vault-level settings loaded from and saved to the meta table.
+     * Currently exposes two settings:
+     *   - Theme:   light / dark / system (persisted as meta key "theme")
+     *   - Timeout: idle minutes before auto-exit (persisted as meta key "client-timeout")
+     *
+     * All reads and writes go through Mimir meta helpers so encryption is consistent
+     * with the rest of the vault. Changes take effect immediately on Save.
+     */
+    public class SettingsPanel {
+
+        // ===== STATIC SHARED FIELDS =====
+        protected static Mimir databaseutilities = new Mimir();
+
+        public static boolean DEBUG = false;
+
+        // ===== THEME OPTIONS: must match ThemeManager.detect() accepted values =====
+        private static final String[] THEME_OPTIONS = { "system", "light", "dark" };
+
+        // ===== TIMEOUT BOUNDS: minutes; spinner enforces these limits =====
+        private static final int TIMEOUT_MIN     = 1;
+        private static final int TIMEOUT_MAX     = 120;
+        private static final int TIMEOUT_DEFAULT = 15;
+        private static final int TIMEOUT_STEP    = 1;
+
+        // ===== DEPENDENCIES =====
+        private final Connection conn;
+        private final JFrame     parent;
+        private final int        currentTimeout;
+        private final Runnable   onTimeoutChanged; // ===== Callback to restart IdleTimeoutManager =====
+
+        public SettingsPanel(Connection conn, JFrame parent,
+                            int currentTimeout, boolean debug,
+                            Runnable onTimeoutChanged) {
+            this.conn             = conn;
+            this.parent           = parent;
+            this.currentTimeout   = currentTimeout;
+            this.onTimeoutChanged = onTimeoutChanged;
+            DEBUG                 = debug;
+        }
+
+
+        // ===================================================================
+        // ===== SHOW SETTINGS DIALOG
+        // ===================================================================
+
+        /**
+         * Opens the settings dialog, pre-populated from the meta table.
+         * Saves on OK, discards on Cancel. Theme applies immediately on save.
+         * Timeout change fires onTimeoutChanged callback so IdleTimeoutManager restarts.
+         */
+        public void showSettingsPane() {
+
+            // ===== LOAD CURRENT VALUES FROM META TABLE =====
+            // Fall back to safe defaults if keys are missing or unreadable
+            String savedTheme   = loadMetaText("theme",          "system");
+            String savedTimeout = loadMetaText("client-timeout", String.valueOf(currentTimeout));
+
+            int savedTimeoutInt;
+            try {
+                savedTimeoutInt = Integer.parseInt(savedTimeout.trim());
+            } catch (NumberFormatException ex) {
+                // ===== FALLBACK: meta value was corrupt or missing =====
+                savedTimeoutInt = TIMEOUT_DEFAULT;
+                if (DEBUG) System.out.println("Settings: bad timeout in meta, defaulting to " + TIMEOUT_DEFAULT);
+            }
+
+            // ===== DIALOG SETUP =====
+            JDialog dialog = new JDialog(parent, "Settings", true);
+            dialog.setSize(360, 230);
+            dialog.setLocationRelativeTo(parent);
+            dialog.setResizable(false);
+            dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+
+            JPanel root = new JPanel(new BorderLayout());
+            root.setBackground(ThemeManager.BG);
+            root.setBorder(BorderFactory.createEmptyBorder(16, 20, 12, 20));
+
+            // ===== TITLE =====
+            JLabel title = new JLabel("Settings");
+            title.setFont(new Font("Segoe UI", Font.BOLD, 15));
+            title.setForeground(ThemeManager.ACCENT);
+            title.setBorder(BorderFactory.createEmptyBorder(0, 0, 14, 0));
+            root.add(title, BorderLayout.NORTH);
+
+            // ===== FORM PANEL: two-column grid for label + control pairs =====
+            JPanel form = new JPanel(new GridBagLayout());
+            form.setBackground(ThemeManager.BG);
+            GridBagConstraints gbc = new GridBagConstraints();
+            gbc.insets  = new Insets(8, 4, 8, 4);
+            gbc.anchor  = GridBagConstraints.WEST;
+            gbc.fill    = GridBagConstraints.HORIZONTAL;
+
+            // ===== THEME LABEL =====
+            gbc.gridx = 0; gbc.gridy = 0; gbc.weightx = 0.3;
+            JLabel themeLabel = new JLabel("Theme:");
+            themeLabel.setForeground(ThemeManager.TEXT);
+            themeLabel.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+            form.add(themeLabel, gbc);
+
+            // ===== THEME COMBO BOX =====
+            gbc.gridx = 1; gbc.weightx = 0.7;
+            JComboBox<String> themeCombo = new JComboBox<>(THEME_OPTIONS);
+            themeCombo.setBackground(ThemeManager.SURFACE);
+            themeCombo.setForeground(ThemeManager.TEXT);
+            themeCombo.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+            // ===== PRE-SELECT the saved theme; default to index 0 if not found =====
+            for (int i = 0; i < THEME_OPTIONS.length; i++) {
+                if (THEME_OPTIONS[i].equals(savedTheme)) {
+                    themeCombo.setSelectedIndex(i);
+                    break;
+                }
+            }
+            form.add(themeCombo, gbc);
+
+            // ===== TIMEOUT LABEL =====
+            gbc.gridx = 0; gbc.gridy = 1; gbc.weightx = 0.3;
+            JLabel timeoutLabel = new JLabel("Idle Timeout (min):");
+            timeoutLabel.setForeground(ThemeManager.TEXT);
+            timeoutLabel.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+            form.add(timeoutLabel, gbc);
+
+            // ===== TIMEOUT SPINNER: integer only, bounded by TIMEOUT_MIN / TIMEOUT_MAX =====
+            gbc.gridx = 1; gbc.weightx = 0.7;
+            SpinnerNumberModel spinnerModel = new SpinnerNumberModel(
+                Math.max(TIMEOUT_MIN, Math.min(TIMEOUT_MAX, savedTimeoutInt)), // ===== Clamp loaded value =====
+                TIMEOUT_MIN,
+                TIMEOUT_MAX,
+                TIMEOUT_STEP
+            );
+            JSpinner timeoutSpinner = new JSpinner(spinnerModel);
+            timeoutSpinner.setBackground(ThemeManager.SURFACE);
+            timeoutSpinner.setForeground(ThemeManager.TEXT);
+            timeoutSpinner.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+            // ===== BLOCK MANUAL TEXT ENTRY of non-numeric values =====
+            ((JSpinner.DefaultEditor) timeoutSpinner.getEditor()).getTextField().setEditable(false);
+            form.add(timeoutSpinner, gbc);
+
+            root.add(form, BorderLayout.CENTER);
+
+            // ===== BUTTON BAR =====
+            JPanel btnBar = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+            btnBar.setBackground(ThemeManager.BG);
+
+            JButton btnCancel = new JButton("Cancel");
+            JButton btnSave   = new JButton("Save");
+            ThemeManager.styleSurfaceButton(btnCancel);
+            ThemeManager.styleSurfaceButton(btnSave);
+
+            // ===== CANCEL: discard all changes and close =====
+            btnCancel.addActionListener(e -> dialog.dispose());
+
+            // ===== SAVE: persist both settings then apply them live =====
+            btnSave.addActionListener(e -> {
+                String chosenTheme   = (String) themeCombo.getSelectedItem();
+                int    chosenTimeout = (Integer) timeoutSpinner.getValue();
+
+                // ===== PERSIST TO META TABLE =====
+                boolean themeSaved   = saveMetaText("theme",          chosenTheme);
+                boolean timeoutSaved = saveMetaText("client-timeout", String.valueOf(chosenTimeout));
+
+                if (!themeSaved || !timeoutSaved) {
+                    // ===== PARTIAL SAVE FAILURE: warn but do not block apply =====
+                    ToastManager.error(parent, "One or more settings failed to save.");
+                }
+
+                // ===== APPLY THEME IMMEDIATELY without restart =====
+                ThemeManager.detect(DEBUG, chosenTheme);
+                if (DEBUG) System.out.println("Settings: theme applied -> " + chosenTheme);
+
+                // ===== FIRE TIMEOUT CALLBACK so IdleTimeoutManager restarts with new value =====
+                if (onTimeoutChanged != null) {
+                    onTimeoutChanged.run();
+                    if (DEBUG) System.out.println("Settings: timeout applied -> " + chosenTimeout + " min");
+                }
+
+                ToastManager.success(parent, "Settings saved.");
+                dialog.dispose();
+            });
+
+            btnBar.add(btnCancel);
+            btnBar.add(btnSave);
+            root.add(btnBar, BorderLayout.SOUTH);
+
+            dialog.setContentPane(root);
+            dialog.setVisible(true);
+        }
+
+
+        // ===================================================================
+        // ===== META TABLE HELPERS
+        // ===================================================================
+
+        /**
+         * Reads a plain-text value from the meta table by key.
+         * Returns the fallback if the key is absent or a read error occurs.
+         *
+         * @param key      meta table key to look up
+         * @param fallback value to return if key is missing or unreadable
+         * @return stored Tvalue string, or fallback
+         */
+        private String loadMetaText(String key, String fallback) {
+            try {
+                String val = Mimir.Pull_DB_Text_Meta_item(conn, key);
+                // ===== Guard: treat blank or null as missing =====
+                return (val != null && !val.isBlank()) ? val.trim() : fallback;
+            } catch (Exception ex) {
+                if (DEBUG) System.out.println("Settings: failed to load meta key '" + key + "': " + ex);
+                return fallback;
+            }
+        }
+
+        /**
+         * Writes a plain-text value to the meta table using INSERT OR REPLACE.
+         * Returns true on success, false on failure so the caller can warn the user.
+         *
+         * @param key   meta table key to write
+         * @param value plain-text value to store in Tvalue
+         * @return true if the write succeeded
+         */
+        private boolean saveMetaText(String key, String value) {
+            // ===== INSERT OR REPLACE keeps the meta table schema consistent =====
+            // ===== Bvalue and iv are left null for plain-text settings entries =====
+            String sql = "INSERT OR REPLACE INTO meta (key, Tvalue, Bvalue, iv) VALUES (?, ?, NULL, NULL)";
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, key);
+                ps.setString(2, value);
+                ps.executeUpdate();
+                if (DEBUG) System.out.println("Settings: saved meta key '" + key + "' = " + value);
+                return true;
+            } catch (SQLException ex) {
+                if (DEBUG) System.out.println("Settings: failed to save meta key '" + key + "': " + ex);
+                return false;
+            }
         }
     }
 }

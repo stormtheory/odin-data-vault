@@ -336,13 +336,28 @@ public class Login extends JFrame {
         // ===== LOAD SQLITE JDBC DRIVER =====
         Class.forName("org.sqlite.JDBC");
 
-        // ===== VAULT CHECKS =====
+        // ===== VAULT CHECKS =======================================================================================================
         try{
         if (!isNew) {
             conn          = DriverManager.getConnection("jdbc:sqlite:" + vaultPath);
             DATABASE_TYPE = Mimir.Pull_DB_Text_Meta_item(conn, "type");
             VaultLevel    = Mimir.Pull_DB_Text_Meta_item(conn, "vault_level");
         }} catch (Exception e) {isNew = true; System.out.println("ERROR: Database maybe corrupted");}
+        try{
+        if (!isNew) {    
+            theme_override = Mimir.Pull_DB_Text_Meta_item(conn, "theme");
+            if (theme_override.equals("light") || theme_override.equals("dark") || theme_override.equals("system")) {
+                ThemeManager.detect(DEBUG, theme_override);
+                if (DEBUG) System.out.println("Theme DB override setting to: " + theme_override);
+            }}} catch (Exception f) {if (DEBUG) System.out.println("DB Theme error: " + f);}
+        
+        try{
+        if (!isNew) {    
+            String raw = Mimir.Pull_DB_Text_Meta_item(conn, "client-timeout");
+            long timeout_override = (raw != null && !raw.isBlank()) ? Integer.parseInt(raw.trim()) : IDLE_TIMEOUT_MINUTES;
+            if (DEBUG) System.out.println("DB override Timeout setting to: " + timeout_override);
+            }} catch (Exception t) {if (DEBUG) System.out.println("DB Timeout error: " + t);}
+
 
         // ===== SHUTDOWN HOOK =====
         Mimir.registerShutdownHook(isWindows, DEBUG);
@@ -430,6 +445,7 @@ public class Login extends JFrame {
         odin.dialogIcon       = dialogIcon;
         odin.appIcon          = appIcon;
         odin.PASSWORD_LENGTH  = PASSWORD_LENGTH;
+        odin.IDLE_TIMEOUT_MINUTES = IDLE_TIMEOUT_MINUTES;
         odin.DEBUG            = DEBUG;
             
         // ===== BUILD MAIN WINDOW on EDT - login stays visible until this completes =====
