@@ -21,6 +21,7 @@ public class Odin {
     public  static final String DATABASE_VER       = "0";
     private static final int    CLIPBOARD_CLEAR_MS = 30_000; // 30 seconds
     private static final int    BUFFER_SIZE = 8 * 1024;
+    private static final int    PASSWORD_MAX_LEN = 70;
 
 // =========== FILTER =================
     private JTextField searchField;
@@ -2378,6 +2379,12 @@ table.addMouseListener(new MouseAdapter() {
             return false;
         } else if (password.length == 0) {
             JOptionPane.showMessageDialog(null, "Password cannot be empty!",
+                "Error", JOptionPane.ERROR_MESSAGE, dialogIcon);
+            Yggdrasil.wipeCharArray(password);
+            Yggdrasil.wipeCharArray(p2);
+            return false;
+         } else if (password.length >= PASSWORD_MAX_LEN) {
+            JOptionPane.showMessageDialog(null, "Password can not be longer than " + PASSWORD_MAX_LEN + " characters!",
                 "Error", JOptionPane.ERROR_MESSAGE, dialogIcon);
             Yggdrasil.wipeCharArray(password);
             Yggdrasil.wipeCharArray(p2);
