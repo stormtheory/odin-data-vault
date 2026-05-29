@@ -13,7 +13,7 @@ public class Login extends JFrame {
     // ===== CONFIG - mirrors Odin constants =====
     private static final String DATABASE_VER    = "0";
     private static int    PASSWORD_LENGTH = 12; // Default for Vault Creation and Changes   // 12 is the safest with all Argon2id levels
-
+    private static final int    PASSWORD_MAX_LEN = 70;
     // ===== STARTUP STATE =====
     private static Boolean      notInAJar       = false;
     private static boolean      arg_vaultPath   = false;
@@ -614,6 +614,10 @@ public class Login extends JFrame {
             char[] enteredPassword = pf.getPassword();
             if (enteredPassword.length == 0) {
                 JOptionPane.showMessageDialog(this, "Password cannot be empty.",
+                    "The runes are silent.", JOptionPane.ERROR_MESSAGE);
+                return;
+            } else if (enteredPassword.length >= PASSWORD_MAX_LEN) {
+                JOptionPane.showMessageDialog(this, "Password can not be longer than " + PASSWORD_MAX_LEN + " characters.",
                     "The runes are silent.", JOptionPane.ERROR_MESSAGE);
                 return;
             }
