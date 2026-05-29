@@ -34,7 +34,6 @@ import java.time.format.DateTimeFormatter;
  * with detailed intent comments describing what each would do.
  */
 public class AccountManagement {
-    private IdleTimeoutManager idleManagerstop;
     private int IDLE_TIMEOUT_MINUTES = 10;
     // ===== STATIC SHARED FIELDS =====
     protected static Mimir  databaseutilities = new Mimir();
@@ -286,17 +285,17 @@ public class AccountManagement {
                             IDLE_TIMEOUT_MINUTES = Integer.parseInt(raw.trim());
                         } catch (NumberFormatException ignore) {
                             // ===== GUARD: corrupt meta value - keep current timeout =====
-                            if (DEBUG) System.out.println("Settings: bad timeout value in meta, keeping " + IDLE_TIMEOUT_MINUTES);
+                            if (DEBUG) System.out.println("[Settings] bad timeout value in meta, keeping " + IDLE_TIMEOUT_MINUTES);
                         }
                     }
                 } catch (Exception ex) {
                     // ===== NON-FATAL: keep existing timeout if meta read fails =====
-                    if (DEBUG) System.out.println("Settings: failed to reload timeout from meta: " + ex);
+                    if (DEBUG) System.out.println("[Settings] failed to reload timeout from meta: " + ex);
                 }
-                idleManagerstop.stop();
-                IdleTimeoutManager idleManager = new IdleTimeoutManager(parent, IDLE_TIMEOUT_MINUTES);
-                idleManager.start();
-                if (DEBUG) System.out.println("IdleTimeoutManager restarted at " + IDLE_TIMEOUT_MINUTES + " min");
+                //IdleTimeoutManager idleManager = new IdleTimeoutManager(parent, IDLE_TIMEOUT_MINUTES);
+                //idleManager.stop();
+                //idleManager.start();
+                //if (DEBUG) System.out.println("[Settings] IdleTimeoutManager restarted at " + IDLE_TIMEOUT_MINUTES + " min");
             });
             settings.showSettingsPane();
         });
@@ -550,7 +549,7 @@ public class AccountManagement {
                 String lastLoginBlob = null;
                 try{
                     lastLoginBlob = new String(backend.decryptData(rs.getBytes("last_login"), iv));
-                    if (DEBUG) System.out.println(lastLoginBlob);
+                    if (DEBUG) System.out.println("[Account] " + lastLoginBlob);
                 } catch (Exception e){System.out.println(e);}
                 // ===== DERIVE DISPLAY VALUES from raw column data =====
                 String lastLoginStr = formatLastLogin(lastLoginBlob);

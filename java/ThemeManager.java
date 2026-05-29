@@ -82,11 +82,11 @@ public class ThemeManager {
         if (theme_override.equals("dark")){
             detected = true;
             isDark = true;
-            System.out.println("Theme override Light");
+            System.out.println("[ThemeManager] Theme override called for Dark");
         } else if (theme_override.equals("light")){
             detected = true;
             isDark = false;
-            System.out.println("Theme override Light");
+            System.out.println("[ThemeManager] Theme override called for Light");
         }
 
         // --- 1. macOS detection ---
@@ -256,13 +256,13 @@ public class ThemeManager {
         applyPalette();
         applyUIManagerDefaults();
 
-        // Always print final decision - never gated on debug flag
-        // This is the line that confirms which theme actually loaded
+        if (debug) {
         System.err.println("[ThemeManager] =====================================");
         System.err.println("[ThemeManager] THEME: " + (isDark ? "DARK" : "LIGHT") +
                            "  |  detected=" + detected +
                            "  |  OS=" + System.getProperty("os.name"));
         System.err.println("[ThemeManager] =====================================");
+        }
     }
 
     // ===== APPLY PALETTE =====

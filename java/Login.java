@@ -347,16 +347,18 @@ public class Login extends JFrame {
         if (!isNew) {    
             theme_override = Mimir.Pull_DB_Text_Meta_item(conn, "theme");
             if (theme_override.equals("light") || theme_override.equals("dark") || theme_override.equals("system")) {
-                ThemeManager.detect(DEBUG, theme_override);
-                if (DEBUG) System.out.println("Theme DB override setting to: " + theme_override);
+                if (!theme_override.equals("system")) {
+                    ThemeManager.detect(DEBUG, theme_override);
+                    System.out.println("[DB Check] Theme DB override setting to: " + theme_override);
+                }
             }}} catch (Exception f) {if (DEBUG) System.out.println("DB Theme error: " + f);}
         
         try{
         if (!isNew) {    
             String raw = Mimir.Pull_DB_Text_Meta_item(conn, "client-timeout");
             long timeout_override = (raw != null && !raw.isBlank()) ? Integer.parseInt(raw.trim()) : IDLE_TIMEOUT_MINUTES;
-            if (DEBUG) System.out.println("DB override Timeout setting to: " + timeout_override);
-            }} catch (Exception t) {if (DEBUG) System.out.println("DB Timeout error: " + t);}
+            System.out.println("[DB Check] DB override Timeout setting to: " + timeout_override);
+            }} catch (Exception t) {if (DEBUG) System.out.println("[DB Check] DB Timeout error: " + t);}
 
 
         // ===== SHUTDOWN HOOK =====
